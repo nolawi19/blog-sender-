@@ -1,0 +1,256 @@
+// Prisma schema for the automation engine.
+//
+// Hot-path note: the webhook gateway and the worker never query these tables per
+// request. Endpoints and workflows are loaded into an in-memory snapshot
+// (src/workflows/workflow-loader.ts) and execution records are written
+// asynchronously in batches (src/database/execution-recorder.ts).
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WebhookAuthType {
+  NONE
+  BEARER
+  HMAC
+}
+
+enum WorkflowStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum ExecutionStatus {
+  QUEUED
+  RUNNING
+  RETRYING
+  SUCCEEDED
+  FAILED
+  DEAD_LETTERED
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
+enum DeadLetterStatus {
+  PENDING
+  REQUEUED
+  DISCARDED
+}
+
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  credentials      Credential[]
+  webhookEndpoints WebhookEndpoint[]
+  workflows        Workflow[]
+
+  @@map("users")
+}
+
+/// Secrets for integrations. `encryptedData` is AES-256-GCM ciphertext of a JSON
+/// object (see src/security/credentials.ts). Plaintext never touches the database.
+model Credential {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  name          String
+  provider      String
+  encryptedData String   @map("encrypted_data")
+  keyVersion    String   @default("v1") @map("key_version")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  steps WorkflowStep[]
+
+  @@unique([userId, name])
+  @@index([userId, provider])
+  @@map("credentials")
+}
+
+/// Public entry point: POST /webhooks/:slug.
+model WebhookEndpoint {
+  id                  String          @id @default(uuid()) @db.Uuid
+  userId              String          @map("user_id") @db.Uuid
+  slug                String          @unique
+  source              String
+  authType            WebhookAuthType @default(BEARER) @map("auth_type")
+  /// SHA-256 hex of the bearer token. The token itself is shown once at creation.
+  tokenHash           String?         @map("token_hash")
+  /// Encrypted per-endpoint HMAC secret. Falls back to WEBHOOK_SECRET when null.
+  hmacSecretEncrypted String?         @map("hmac_secret_encrypted")
+  defaultEventType    String?         @map("default_event_type")
+  /// Dot path inside the body used as idempotency key, e.g. "id" or "post.id".
+  idempotencyField    String?         @map("idempotency_field")
+  dedupeByPayloadHash Boolean         @default(true) @map("dedupe_by_payload_hash")
+  isActive            Boolean         @default(true) @map("is_active")
+  createdAt           DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workflows       Workflow[]
+  idempotencyKeys IdempotencyKey[]
+
+  @@index([userId])
+  @@index([isActive])
+  @@map("webhook_endpoints")
+}
+
+model Workflow {
+  id           String         @id @default(uuid()) @db.Uuid
+  userId       String         @map("user_id") @db.Uuid
+  endpointId   String         @map("endpoint_id") @db.Uuid
+  name         String
+  description  String?
+  triggerType  String         @default("webhook") @map("trigger_type")
+  /// Event type this workflow reacts to, e.g. "post.published", or "*" for all.
+  triggerEvent String         @map("trigger_event")
+  status       WorkflowStatus @default(ACTIVE)
+  /// Incremented on every change; jobs carry the version they were enqueued with.
+  version      Int            @default(1)
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint   WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  steps      WorkflowStep[]
+  executions Execution[]
+
+  @@unique([endpointId, name])
+  @@index([endpointId, status, triggerEvent])
+  @@index([userId])
+  @@map("workflows")
+}
+
+model WorkflowStep {
+  id           String   @id @default(uuid()) @db.Uuid
+  workflowId   String   @map("workflow_id") @db.Uuid
+  position     Int
+  /// Referenced by later steps as {{steps.<key>.output...}}.
+  key          String
+  /// Action type resolved through the driver registry, e.g. "telegram.sendPhoto".
+  type         String
+  config       Json     @db.JsonB
+  credentialId String?  @map("credential_id") @db.Uuid
+  /// Optional template; the step runs only when it renders to a truthy value.
+  runIf        String?  @map("run_if")
+  timeoutMs    Int?     @map("timeout_ms")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workflow   Workflow    @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  credential Credential? @relation(fields: [credentialId], references: [id], onDelete: SetNull)
+
+  @@unique([workflowId, position])
+  @@unique([workflowId, key])
+  @@index([credentialId])
+  @@map("workflow_steps")
+}
+
+/// One row per (event, workflow) job. Written asynchronously by the worker.
+model Execution {
+  id                     String          @id @db.Uuid
+  workflowId             String          @map("workflow_id") @db.Uuid
+  workflowVersion        Int             @map("workflow_version")
+  endpointId             String          @map("endpoint_id") @db.Uuid
+  eventId                String          @map("event_id") @db.Uuid
+  eventType              String          @map("event_type")
+  jobId                  String          @map("job_id")
+  requestId              String?         @map("request_id")
+  status                 ExecutionStatus @default(QUEUED)
+  attempts               Int             @default(0)
+  triggerPayload         Json?           @map("trigger_payload") @db.JsonB
+  error                  Json?           @db.JsonB
+  receivedAt             DateTime        @map("received_at") @db.Timestamptz(3)
+  enqueuedAt             DateTime        @map("enqueued_at") @db.Timestamptz(3)
+  startedAt              DateTime?       @map("started_at") @db.Timestamptz(3)
+  finishedAt             DateTime?       @map("finished_at") @db.Timestamptz(3)
+  queueLatencyMs         Float?          @map("queue_latency_ms")
+  outboundStartLatencyMs Float?          @map("outbound_start_latency_ms")
+  executionDurationMs    Float?          @map("execution_duration_ms")
+  totalLatencyMs         Float?          @map("total_latency_ms")
+  createdAt              DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workflow Workflow       @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  logs     ExecutionLog[]
+
+  @@unique([jobId])
+  @@index([workflowId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([eventId])
+  @@map("executions")
+}
+
+model ExecutionLog {
+  id          BigInt   @id @default(autoincrement())
+  executionId String   @map("execution_id") @db.Uuid
+  stepId      String?  @map("step_id") @db.Uuid
+  stepKey     String?  @map("step_key")
+  attempt     Int      @default(1)
+  level       LogLevel @default(INFO)
+  message     String
+  data        Json?    @db.JsonB
+  durationMs  Float?   @map("duration_ms")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  execution Execution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId, createdAt])
+  @@map("execution_logs")
+}
+
+/// Durable record of idempotency keys. Redis (SET NX) is the hot-path authority;
+/// this table is the audit trail and survives Redis TTL expiry.
+model IdempotencyKey {
+  id         String   @id @default(uuid()) @db.Uuid
+  endpointId String   @map("endpoint_id") @db.Uuid
+  key        String
+  eventId    String   @map("event_id") @db.Uuid
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@unique([endpointId, key])
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
+
+model DeadLetterJob {
+  id            String           @id @default(uuid()) @db.Uuid
+  executionId   String?          @map("execution_id") @db.Uuid
+  jobId         String           @map("job_id")
+  queueName     String           @map("queue_name")
+  workflowId    String?          @map("workflow_id") @db.Uuid
+  eventId       String?          @map("event_id") @db.Uuid
+  payload       Json             @db.JsonB
+  error         Json             @db.JsonB
+  errorCategory String           @map("error_category")
+  attempts      Int
+  status        DeadLetterStatus @default(PENDING)
+  requeuedAt    DateTime?        @map("requeued_at") @db.Timestamptz(3)
+  requeueJobId  String?          @map("requeue_job_id")
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([workflowId])
+  @@index([executionId])
+  @@map("dead_letter_jobs")
+}

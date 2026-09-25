@@ -1,0 +1,160 @@
+# Automation engine stack: gateway, worker, Redis, PostgreSQL.
+#   cp .env.example .env   # fill ENCRYPTION_KEY, WEBHOOK_SECRET, TELEGRAM_BOT_TOKEN
+#   docker compose up -d --build
+#   docker compose up -d --scale worker=3          # horizontal scaling
+#   docker compose --profile bench up -d mock-telegram   # local Telegram mock
+
+name: automation-engine
+
+x-app: &app
+  build:
+    context: .
+    target: runtime
+  image: automation-engine:latest
+  env_file: .env
+  environment: &app-env
+    NODE_ENV: production
+    DATABASE_URL: postgresql://${POSTGRES_USER:-automation}:${POSTGRES_PASSWORD:-automation}@postgres:5432/${POSTGRES_DB:-automation}?schema=public
+    REDIS_URL: redis://redis:6379
+    HOST: 0.0.0.0
+  restart: unless-stopped
+  stop_grace_period: 30s
+  networks: [backend]
+  ulimits:
+    nofile: { soft: 65536, hard: 65536 }
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  postgres:
+    image: postgres:16.10-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-automation}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-automation}
+      POSTGRES_DB: ${POSTGRES_DB:-automation}
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - wal_compression=on
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - random_page_cost=1.1
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backend]
+    # Uncomment to reach PostgreSQL from the host (psql, Prisma Studio):
+    # ports: ["5432:5432"]
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - ./docker/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    sysctls:
+      net.core.somaxconn: 1024
+    networks: [backend]
+
+  migrate:
+    <<: *app
+    command: ["npx", "prisma", "migrate", "deploy"]
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  gateway:
+    <<: *app
+    command: ["node", "dist/server.js"]
+    ports: ["${PORT:-3000}:3000"]
+    environment:
+      <<: *app-env
+      PORT: 3000
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      start_period: 15s
+      retries: 3
+    sysctls:
+      net.core.somaxconn: 4096
+
+  worker:
+    <<: *app
+    command: ["node", "dist/worker.js"]
+    environment:
+      <<: *app-env
+      WORKER_METRICS_PORT: 9464
+    expose: ["9464"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9464/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      start_period: 20s
+      retries: 3
+
+  # ---- optional: local Telegram mock and k6 load generator (profile "bench") ----
+  mock-telegram:
+    <<: *app
+    profiles: ["bench"]
+    command: ["node", "dist/scripts/mock-telegram.js"]
+    environment:
+      MOCK_TELEGRAM_PORT: 8081
+      MOCK_LATENCY_MS: ${MOCK_LATENCY_MS:-30}
+      MOCK_FAIL_FIRST: ${MOCK_FAIL_FIRST:-0}
+      MOCK_ERROR_RATE: ${MOCK_ERROR_RATE:-0}
+      MOCK_RATE_LIMIT_RATE: ${MOCK_RATE_LIMIT_RATE:-0}
+    expose: ["8081"]
+    depends_on: []
+
+  k6:
+    image: grafana/k6:1.3.0
+    profiles: ["bench"]
+    networks: [backend]
+    volumes:
+      - ./bench:/bench:ro
+    environment:
+      WEBHOOK_URL: http://gateway:3000/webhooks/blog
+      WEBHOOK_TOKEN: ${WEBHOOK_TOKEN:-}
+      RATES: ${RATES:-100,500,1000,5000}
+      STAGE_SECONDS: ${STAGE_SECONDS:-20}
+    command: ["run", "/bench/k6-webhook.js"]
+    depends_on:
+      gateway: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  backend:
+    driver: bridge

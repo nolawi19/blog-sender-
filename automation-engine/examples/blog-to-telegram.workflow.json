@@ -1,0 +1,32 @@
+{
+  "owner": { "email": "owner@example.com", "name": "Blog Owner" },
+  "credentials": [
+    { "name": "telegram-bot", "provider": "telegram", "fromEnv": { "botToken": "TELEGRAM_BOT_TOKEN" } }
+  ],
+  "endpoint": {
+    "slug": "blog",
+    "source": "blog",
+    "authType": "BEARER",
+    "defaultEventType": "post.published",
+    "idempotencyField": "id"
+  },
+  "workflows": [
+    {
+      "name": "Blog post to Telegram photo",
+      "description": "Posts the cover image and title of every published blog post to Telegram.",
+      "trigger": { "type": "webhook", "event": "post.published" },
+      "steps": [
+        {
+          "key": "announce",
+          "type": "telegram.sendPhoto",
+          "credential": "telegram-bot",
+          "config": {
+            "chatId": "{{trigger.body.telegram_chat_id}}",
+            "photo": "{{trigger.body.image}}",
+            "caption": "{{trigger.body.title}}"
+          }
+        }
+      ]
+    }
+  ]
+}

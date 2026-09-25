@@ -1,0 +1,10 @@
+{
+  "id": "post-1001",
+  "type": "post.published",
+  "title": "Shipping a sub-30ms automation engine",
+  "excerpt": "<p>How we replaced a SaaS automation tool with <b>Fastify</b>, BullMQ &amp; Redis.</p>",
+  "url": "https://blog.example.com/posts/sub-30ms-automation-engine",
+  "image": "https://picsum.photos/seed/automation-engine/1200/630",
+  "author": { "name": "Alex Doe" },
+  "telegram_chat_id": "REPLACE_WITH_YOUR_CHAT_ID"
+}

@@ -1,0 +1,47 @@
+{
+  "owner": { "email": "owner@example.com", "name": "Blog Owner" },
+  "credentials": [
+    { "name": "telegram-bot", "provider": "telegram", "fromEnv": { "botToken": "TELEGRAM_BOT_TOKEN" } }
+  ],
+  "endpoint": {
+    "slug": "blog-signed",
+    "source": "blog",
+    "authType": "HMAC",
+    "defaultEventType": "post.published",
+    "idempotencyField": "id"
+  },
+  "workflows": [
+    {
+      "name": "Rich blog announcement",
+      "description": "HTML caption with escaping, photo when available, text message fallback otherwise.",
+      "trigger": { "type": "webhook", "event": "post.published" },
+      "steps": [
+        {
+          "key": "photo",
+          "type": "telegram.sendPhoto",
+          "credential": "telegram-bot",
+          "runIf": "{{trigger.body.image}}",
+          "timeoutMs": 10000,
+          "config": {
+            "chatId": "{{trigger.body.telegram_chat_id}}",
+            "photo": "{{trigger.body.image}}",
+            "parseMode": "HTML",
+            "caption": "<b>{{trigger.body.title | escape_html}}</b>\n{{trigger.body.excerpt | strip_html | truncate:700 | escape_html}}\n\n✍️ {{trigger.body.author.name | default:\"Editorial team\" | escape_html}}\n<a href=\"{{trigger.body.url | escape_html}}\">Read more</a>"
+          }
+        },
+        {
+          "key": "text_fallback",
+          "type": "telegram.sendMessage",
+          "credential": "telegram-bot",
+          "runIf": "{{trigger.body.image | not}}",
+          "config": {
+            "chatId": "{{trigger.body.telegram_chat_id}}",
+            "parseMode": "HTML",
+            "text": "<b>{{trigger.body.title | escape_html}}</b>\n{{trigger.body.url | escape_html}}",
+            "disableWebPagePreview": false
+          }
+        }
+      ]
+    }
+  ]
+}

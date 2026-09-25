@@ -1,0 +1,51 @@
+{
+  "name": "automation-engine",
+  "version": "1.0.0",
+  "description": "Low-latency webhook automation engine (Zapier/Make-style) built with Fastify, BullMQ, Redis, PostgreSQL and Prisma",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "prisma:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "dev:gateway": "tsx watch --env-file-if-exists=.env src/server.ts",
+    "dev:worker": "tsx watch --env-file-if-exists=.env src/worker.ts",
+    "start:gateway": "node --env-file-if-exists=.env dist/server.js",
+    "start:worker": "node --env-file-if-exists=.env dist/worker.js",
+    "workflow:create": "tsx --env-file-if-exists=.env src/scripts/create-workflow.ts",
+    "dlq:list": "tsx --env-file-if-exists=.env src/scripts/requeue-dead-letters.ts --list",
+    "dlq:requeue": "tsx --env-file-if-exists=.env src/scripts/requeue-dead-letters.ts",
+    "mock:telegram": "tsx src/scripts/mock-telegram.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "INTEGRATION_REDIS_URL=${INTEGRATION_REDIS_URL:-redis://localhost:6379/15} vitest run tests/integration",
+    "bench:mapper": "vitest bench --run",
+    "bench:load": "tsx bench/load-test.ts"
+  },
+  "dependencies": {
+    "@fastify/rate-limit": "^10.3.0",
+    "@prisma/client": "^6.19.3",
+    "@prometheus-io/client": "^0.16.1",
+    "bullmq": "^5.81.5",
+    "fastify": "^5.12.5",
+    "ioredis": "^5.11.1",
+    "pino": "^9.14.0",
+    "prisma": "^6.19.3",
+    "undici": "^7.30.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/autocannon": "^7.12.7",
+    "@types/node": "^22.20.4",
+    "autocannon": "^8.0.0",
+    "pino-pretty": "^13.1.3",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}
