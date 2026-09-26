@@ -5,7 +5,7 @@
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createPrismaClient } from './database/prisma.js';
-import { RedisIdempotencyStore } from './gateway/idempotency.js';
+import { DurableIdempotencyStore, RedisIdempotencyStore } from './gateway/idempotency.js';
 import { ShutdownManager } from './lib/shutdown.js';
 import { createLogger } from './observability/logger.js';
 import { Metrics } from './observability/metrics.js';
@@ -48,11 +48,20 @@ async function main(): Promise<void> {
   shutdown.register('queue-monitor', () => monitor.stop());
 
   const metrics = new Metrics({ service: 'gateway', queue });
+  const redisIdempotency = new RedisIdempotencyStore(redis);
+  const idempotency = config.IDEMPOTENCY_DURABLE
+    ? new DurableIdempotencyStore(
+        redisIdempotency,
+        async (endpointId, key) =>
+          (await prisma.idempotencyKey.findUnique({ where: { endpointId_key: { endpointId, key } }, select: { eventId: true } }))?.eventId ?? null,
+        { onLookupError: (err) => logger.warn({ err }, 'durable idempotency lookup failed; event accepted on the Redis check alone') },
+      )
+    : redisIdempotency;
   const app = await buildApp({
     config,
     logger,
     registry: loader,
-    idempotency: new RedisIdempotencyStore(redis),
+    idempotency,
     publisher: new BullMqEventPublisher(queue),
     backpressure: monitor,
     metrics,

@@ -179,6 +179,20 @@ describe('automation worker processor', () => {
     ]);
   });
 
+  it('records the failed step, category and retry status for operators', async () => {
+    const retrying = harness({ steps: 2, failures: { s2: new ExternalApiError('telegram 502', 502) } });
+    await retrying.process(new FakeJob(makeJobData(retrying.workflow), 0, { attempts: 3 })).catch(() => undefined);
+    expect(retrying.sink.executions.at(-1)).toMatchObject({
+      status: 'RETRYING',
+      error: { failedStep: 's2', failedStepType: 'test.send', category: 'EXTERNAL_API', retryStatus: 'retry_scheduled' },
+    });
+
+    const permanent = harness({ failures: { s1: new ValidationError('bad chat') } });
+    await permanent.process(new FakeJob(makeJobData(permanent.workflow))).catch(() => undefined);
+    expect(permanent.sink.executions.at(-1)).toMatchObject({ status: 'DEAD_LETTERED', error: { failedStep: 's1', retryStatus: 'dead_lettered' } });
+    expect(permanent.deadLetters.entries[0]!.error).toMatchObject({ failedStep: 's1', category: 'VALIDATION', retryStatus: 'dead_lettered' });
+  });
+
   it('stores resume state with dead-lettered jobs for safe requeueing', async () => {
     const h = harness({ steps: 2, failures: { s2: new ValidationError('bad') } });
     await h.process(new FakeJob(makeJobData(h.workflow))).catch(() => undefined);

@@ -69,6 +69,8 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: int(1).default(1_000),
   RATE_LIMIT_WINDOW_MS: int(100).default(1_000),
   IDEMPOTENCY_TTL_SEC: int(1).default(86_400),
+  /** Also consult the idempotency_keys table when Redis no longer has the key. */
+  IDEMPOTENCY_DURABLE: boolFromEnv.default(true),
   QUEUE_BACKPRESSURE_THRESHOLD: int(1).default(100_000),
   CACHE_REFRESH_INTERVAL_MS: int(1_000).default(30_000),
   RECORDER_FLUSH_INTERVAL_MS: int(10).default(200),

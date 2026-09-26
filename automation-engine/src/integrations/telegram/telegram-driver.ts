@@ -77,11 +77,27 @@ export class TelegramMigrateError extends ExternalApiError {
 // Photo download failures on Telegram's side are usually transient.
 const TRANSIENT_400 = /failed to get HTTP URL content|wrong type of the web page content|WEBPAGE_CURL_FAILED|WEBPAGE_MEDIA_EMPTY/i;
 
+const HINTS: Array<[RegExp, string]> = [
+  [
+    /bot is not a member|need administrator rights|not enough rights|have no rights to send|CHAT_WRITE_FORBIDDEN|CHAT_ADMIN_REQUIRED/i,
+    'Add the bot to the channel as an administrator with the "Post messages" permission.',
+  ],
+  [/chat not found/i, 'TELEGRAM_CHANNEL_ID does not match a channel the bot can see: use @channelusername (public) or the -100 channel ID, and add the bot to the channel.'],
+  [/bot was blocked by the user|user is deactivated|bot can't initiate conversation/i, 'The destination is a personal chat, not the channel: set TELEGRAM_CHANNEL_ID to the channel.'],
+  [/can't parse entities/i, 'The message HTML is invalid; every template value must be passed through escape_html.'],
+  [/Unauthorized|Not Found/i, 'TELEGRAM_BOT_TOKEN is invalid or revoked; check the bot in @BotFather.'],
+];
+
+export function telegramHint(description: string): string | undefined {
+  return HINTS.find(([pattern]) => pattern.test(description))?.[1];
+}
+
 /** Maps a Telegram error envelope to a classified AppError. */
 export function toTelegramError(method: string, httpStatus: number, envelope: TelegramEnvelope<unknown> | null): AppError {
   const code = envelope?.error_code ?? httpStatus;
   const description = (envelope?.description ?? `HTTP ${httpStatus}`).slice(0, 500);
-  const details = { method, errorCode: code, description };
+  const hint = telegramHint(description);
+  const details = hint ? { method, errorCode: code, description, hint } : { method, errorCode: code, description };
 
   if (code === 429) {
     const retryAfterSec = envelope?.parameters?.retry_after ?? 1;

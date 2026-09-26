@@ -123,12 +123,35 @@ export function escapeMarkdownV2(text: string): string {
   return text.replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
 }
 
-const ENTITIES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&apos;': "'", '&nbsp;': ' ' };
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  hellip: '…', mdash: '—', ndash: '–', lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”',
+  laquo: '«', raquo: '»', bull: '•', middot: '·', copy: '©', reg: '®', trade: '™', euro: '€', deg: '°', times: '×',
+};
+
+/** Decodes numeric (&#8217; &#x2019;) and common named HTML entities; unknown ones are left as they are. */
+export function decodeEntities(text: string): string {
+  return text.replace(/&(#\d{1,7}|#x[0-9a-fA-F]{1,6}|[a-zA-Z]{2,8});/g, (entity, body: string) => {
+    if (body[0] === '#') {
+      const codePoint = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+      const valid = codePoint > 0 && codePoint <= 0x10ffff && !(codePoint >= 0xd800 && codePoint <= 0xdfff);
+      return valid ? String.fromCodePoint(codePoint) : entity;
+    }
+    return NAMED_ENTITIES[body] ?? entity;
+  });
+}
+
+/** Converts Blogger/HTML markup to plain text: drops scripts/styles and tags, decodes entities, tidies whitespace. */
 export function stripHtml(text: string): string {
-  return text
-    .replace(/<(br|\/p|\/div|\/li)\s*\/?>/gi, '\n')
-    .replace(/<[^>]*>/g, '')
-    .replace(/&(?:amp|lt|gt|quot|#39|apos|nbsp);/g, (e) => ENTITIES[e] ?? e)
+  return decodeEntities(
+    text
+      .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<(br|\/p|\/div|\/li|\/h[1-6])\s*\/?>/gi, '\n')
+      .replace(/<[^>]*>/g, ''),
+  )
+    .replace(/[ \t\u00a0]+/g, ' ')
+    .replace(/ *\n */g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -210,6 +233,7 @@ const filters = new Map<string, FilterSpec>([
   ],
   ['not', { minArgs: 0, maxArgs: 0, fn: (v) => !isTruthy(v) }],
   ['http_url', { minArgs: 0, maxArgs: 0, fn: (v) => toHttpUrl(v) }],
+  ['decode_entities', { minArgs: 0, maxArgs: 0, fn: (v) => decodeEntities(toText(v)) }],
 ]);
 
 export function registerFilter(name: string, spec: FilterSpec): void {

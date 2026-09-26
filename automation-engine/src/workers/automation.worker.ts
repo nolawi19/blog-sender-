@@ -52,9 +52,9 @@ export function rateLimitDelay(retryAfterMs: number | undefined, random: () => n
   return Math.round(base + random() * Math.min(Math.max(base, 100), 1_000));
 }
 
-function unwrap(err: unknown): { error: AppError; steps: StepExecutionRecord[] } {
-  if (err instanceof StepFailedError) return { error: err.error, steps: err.steps };
-  return { error: classifyError(err), steps: [] };
+function unwrap(err: unknown): { error: AppError; steps: StepExecutionRecord[]; failedStep: StepExecutionRecord | undefined } {
+  if (err instanceof StepFailedError) return { error: err.error, steps: err.steps, failedStep: err.failedStep };
+  return { error: classifyError(err), steps: [], failedStep: undefined };
 }
 
 /**
@@ -219,9 +219,22 @@ export function createAutomationProcessor(deps: ProcessorDeps): (job: WorkerJob,
       if (outboundStartLatencyMs !== undefined) result.outboundStartLatencyMs = outboundStartLatencyMs;
       return result;
     } catch (raw) {
-      const { error, steps } = unwrap(raw);
+      const { error, steps, failedStep } = unwrap(raw);
       const finishedAt = clock();
       const serialized = serializeError(error);
+      if (failedStep) {
+        serialized.failedStep = failedStep.stepKey;
+        serialized.failedStepType = failedStep.type;
+      }
+      // Everything an operator needs to diagnose the failure, on one log line.
+      const failure = {
+        err: error,
+        failedStep: failedStep?.stepKey,
+        failedStepType: failedStep?.type,
+        category: error.category,
+        code: error.code,
+        hint: error.details?.['hint'],
+      };
 
       // Rate limits are not failures: postpone the job without spending a retry
       // attempt (BullMQ DelayedError), up to rateLimitMaxDeferMs after receipt.
@@ -231,9 +244,10 @@ export function createAutomationProcessor(deps: ProcessorDeps): (job: WorkerJob,
         await job.updateData({ ...data, resume: { completedSteps }, rateLimitDeferrals: deferrals });
         await job.moveToDelayed(Date.now() + delayMs, token);
         writeStepLogs(steps);
+        serialized.retryStatus = 'postponed_rate_limit';
         deps.sink.recordExecution({ ...base, status: 'RETRYING', finishedAt, error: serialized });
         deps.metrics?.jobsProcessed.inc({ status: 'rate_limited' });
-        log.debug({ delayMs, deferrals, code: error.code }, 'rate limited; job postponed without consuming a retry');
+        log.info({ ...failure, err: undefined, retryStatus: serialized.retryStatus, delayMs, deferrals }, 'rate limited; job postponed without consuming a retry');
         throw new DelayedError();
       }
 
@@ -243,6 +257,7 @@ export function createAutomationProcessor(deps: ProcessorDeps): (job: WorkerJob,
       deps.metrics?.jobFailures.inc({ category: error.category });
 
       if (final) {
+        serialized.retryStatus = 'dead_lettered';
         await deps.deadLetters.record({
           executionId: data.executionId,
           jobId,
@@ -256,15 +271,19 @@ export function createAutomationProcessor(deps: ProcessorDeps): (job: WorkerJob,
         deps.sink.recordExecution({ ...base, status: 'DEAD_LETTERED', finishedAt, error: serialized });
         deps.metrics?.deadLetters.inc({ category: error.category });
         deps.metrics?.jobsProcessed.inc({ status: 'dead_lettered' });
-        log.error({ err: error, retryable: error.retryable, exhausted }, 'execution failed permanently; moved to dead-letter store');
+        log.error({ ...failure, retryStatus: serialized.retryStatus, retryable: error.retryable, exhausted }, 'execution failed permanently; moved to dead-letter store');
         if (!error.retryable) throw new UnrecoverableError(`[${error.code}] ${serialized.message}`);
         throw error;
       }
 
+      serialized.retryStatus = 'retry_scheduled';
       deps.sink.recordExecution({ ...base, status: 'RETRYING', finishedAt, error: serialized });
       deps.metrics?.jobRetries.inc({ category: error.category });
       deps.metrics?.jobsProcessed.inc({ status: 'retrying' });
-      log.warn({ err: error, nextAttempt: attempt + 1, maxAttempts, retryAfterMs: error.retryAfterMs }, 'execution failed; retry scheduled');
+      log.warn(
+        { ...failure, retryStatus: serialized.retryStatus, nextAttempt: attempt + 1, maxAttempts, retryAfterMs: error.retryAfterMs },
+        'execution failed; retry scheduled',
+      );
       throw error;
     }
   };

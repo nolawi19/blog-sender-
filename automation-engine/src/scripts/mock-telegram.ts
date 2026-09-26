@@ -9,6 +9,7 @@
  *   MOCK_ERROR_RATE       0..1 probability of a 500 response
  *   MOCK_RATE_LIMIT_RATE  0..1 probability of a 429 with retry_after=1
  *   MOCK_FAIL_FIRST       respond 500 to the first N requests (retry testing)
+ *   MOCK_BOT_NOT_ADMIN=1  simulate a bot that was not added to the channel
  *
  * Like the real API, sendPhoto is rejected with 400 when the photo is not a URL
  * ("wrong file identifier/HTTP URL specified") or its host cannot be reached
@@ -88,7 +89,23 @@ const server = createServer(async (req, res) => {
   const text = String(body['text'] ?? body['caption'] ?? '');
   recent.push({ at: new Date().toISOString(), method, chat_id: body['chat_id'], ...(method === 'sendPhoto' ? { photo: body['photo'] } : {}), text: text.slice(0, 200) });
   if (recent.length > 50) recent.shift();
+  if (method === 'getMe') return send(200, { ok: true, result: { id: 123456789, is_bot: true, first_name: 'Mock bot', username: 'mock_automation_bot' } });
   if (body['chat_id'] === undefined || body['chat_id'] === '') return send(400, { ok: false, error_code: 400, description: 'Bad Request: chat_id is empty' });
+  // Like Telegram: @username and -100... IDs are channels here, positive IDs are personal chats.
+  const chatRef = String(body['chat_id']);
+  const isChannel = /^@[A-Za-z][A-Za-z0-9_]{4,31}$/.test(chatRef) || /^-100\d+$/.test(chatRef);
+  if (method === 'getChat') {
+    if (isChannel) return send(200, { ok: true, result: { id: -1001234567890, type: 'channel', title: 'Mock channel', ...(chatRef.startsWith('@') ? { username: chatRef.slice(1) } : {}) } });
+    if (/^\d+$/.test(chatRef)) return send(200, { ok: true, result: { id: Number(chatRef), type: 'private', first_name: 'Someone' } });
+    return send(400, { ok: false, error_code: 400, description: 'Bad Request: chat not found' });
+  }
+  if (method === 'getChatMember') {
+    if (process.env['MOCK_BOT_NOT_ADMIN'] === '1') return send(200, { ok: true, result: { status: 'left', user: { id: body['user_id'] } } });
+    return send(200, { ok: true, result: { status: 'administrator', can_post_messages: true, user: { id: body['user_id'] } } });
+  }
+  if (process.env['MOCK_BOT_NOT_ADMIN'] === '1' && isChannel) {
+    return send(403, { ok: false, error_code: 403, description: 'Forbidden: bot is not a member of the channel chat' });
+  }
   if (method === 'sendPhoto' && !body['photo']) return send(400, { ok: false, error_code: 400, description: 'Bad Request: there is no photo in the request' });
   if (method === 'sendPhoto') {
     let host = '';

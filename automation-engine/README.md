@@ -185,6 +185,20 @@ The gateway is published on host port **3001** (`3001:3000` in `docker-compose.y
 
 The destination comes from `TELEGRAM_CHANNEL_ID` (`@channelusername` for a public channel, or the `-100…` channel ID); the Blogger payload does not need to carry a chat ID. Personal chat IDs are rejected at startup. Test payloads for each case are in `examples/test-post-*.json`.
 
+**Verify the channel setup** (read-only; add `--send-test` to post one real test message):
+
+```bash
+docker compose exec worker node dist/scripts/check-telegram.js
+```
+
+It reports whether `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHANNEL_ID` are SET (never their values), whether the token is valid, whether the destination is a *channel* (not a personal chat) and whether the bot is an administrator with the **Post messages** permission. Telegram errors in the worker also carry a `hint` with the exact fix (e.g. "Add the bot to the channel as an administrator with the "Post messages" permission.").
+
+**Duplicates.** A post `id` is accepted once. Redis answers repeats within `IDEMPOTENCY_TTL_SEC`; after that the gateway checks the `idempotency_keys` table (`IDEMPOTENCY_DURABLE=true`, the default), so re-running `sendExistingPosts()` or polling old posts days later does not re-post them.
+
+**Google Apps Script.** `apps-script/AutomationEngineTools.gs` can be added as a new file to your existing Apps Script project (all names start with `ae`, nothing is replaced): run `aeDiagnose()` for a read-only report (triggers and duplicates, Script Property names, tunnel `/health`, photo/text decision for the latest posts), `aeEnsureTrigger()` to have exactly one 5-minute trigger (set `AE_POLL_HANDLER` to your polling function's name), and use `aeExtractImage(entry)` for robust image detection. `apps-script/BloggerToTelegram.gs` is an optional complete reference script (`sendExistingPosts`, `checkNewPosts`, `setupTrigger`) that reads `WEBHOOK_URL` and `WEBHOOK_TOKEN` from Script Properties.
+
+**Cloudflare Quick Tunnel.** A `trycloudflare.com` URL exists only while that `cloudflared` process runs, and a new URL is issued every time it restarts; the Apps Script webhook URL must then be updated. A permanent URL needs a named tunnel on a domain in your Cloudflare account (`cloudflared tunnel create` / `cloudflared tunnel route dns`).
+
 Posts that were dead-lettered before a fix cannot be re-sent from the Apps Script (their `id` is already recorded for idempotency). Requeue them instead: `docker compose run --rm gateway node dist/scripts/requeue-dead-letters.js --list`, then `--id <id>` or `--all`. They run with the current workflow version.
 
 Scale workers horizontally: `docker compose up -d --scale worker=3`.
@@ -383,7 +397,7 @@ Credential-bearing headers are redacted unless `WEBHOOK_FORWARD_SENSITIVE_HEADER
 | `{{ path \| filter \| filter:arg }}` | filters, applied left to right |
 | `\{{` | literal `{{` |
 
-Filters: `default:"x"`, `escape_html`, `escape_markdown` (Telegram MarkdownV2), `strip_html`, `truncate:N` (code-point safe), `upper`, `lower`, `trim`, `json`, `url_encode`, `join:", "`, `first`, `number`, `string`, `not`, `http_url` (the value if it is an absolute http(s) URL, otherwise empty; `//host/…` becomes `https://host/…`).
+Filters: `default:"x"`, `escape_html`, `decode_entities`, `escape_markdown` (Telegram MarkdownV2), `strip_html`, `truncate:N` (code-point safe), `upper`, `lower`, `trim`, `json`, `url_encode`, `join:", "`, `first`, `number`, `string`, `not`, `http_url` (the value if it is an absolute http(s) URL, otherwise empty; `//host/…` becomes `https://host/…`).
 
 Semantics: a template that is exactly one expression keeps the value's type (number, boolean, object); otherwise the result is a string. Missing and null values render as `""` inside strings, and config keys whose single expression is missing/null are omitted (so optional Telegram fields disappear). Templates are compiled when workflows load; syntax errors surface then. No `eval`/`Function`; only the roots `trigger`, `steps`, `workflow`, `execution` are reachable, own properties only, and `__proto__`/`prototype`/`constructor` are rejected.
 
@@ -458,7 +472,7 @@ A generic SSRF-protected `http.request` action is already built in (`url`, `meth
 - Gateway: `GET /health` (liveness), `GET /ready` (Redis, workflow snapshot, queue below threshold, not shutting down), `GET /metrics` (Prometheus), `GET /metrics/latency` (JSON p50/p95/p99/p99.9, 60 s window).
 - Worker: the same endpoints on `WORKER_METRICS_PORT` (9464).
 - Metrics: latency histograms + quantiles listed above, `automation_webhook_requests_total{outcome}`, `automation_jobs_processed_total{status}`, `automation_job_retries_total{category}`, `automation_job_failures_total{category}`, `automation_dead_letter_jobs_total{category}`, `automation_queue_depth{state}`, `automation_idempotency_duplicates_total`, `automation_recorder_dropped_total`, plus Node.js process metrics (CPU, RSS, event loop lag, GC).
-- Logs: JSON with `requestId`, `eventId`, `workflowId`, `executionId`, `stepId`/`stepKey`, `jobId`, `attempt` and per-stage timings.
+- Logs: JSON with `requestId`, `eventId`, `workflowId`, `executionId`, `stepId`/`stepKey`, `jobId`, `attempt` and per-stage timings. Failures add `failedStep`, `category`, `code`, `retryStatus` (`retry_scheduled`, `dead_lettered`, `postponed_rate_limit`) and, for Telegram, a `hint`; the same fields are stored in `executions.error`.
 
 ## Configuration
 
@@ -478,6 +492,7 @@ All variables are documented in [`.env.example`](.env.example) and validated at 
 | `HTTP_TIMEOUT_MS` | `10000` | outbound headers/body timeout |
 | `MAX_RETRIES` | `5` | retries after the first attempt |
 | `LOG_LEVEL` | `info` | Pino level |
+| `IDEMPOTENCY_DURABLE` | `true` | also reject post ids recorded in `idempotency_keys` after the Redis key expired |
 
 ## Known limitations
 

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { RedisError } from '../src/errors.js';
+import { DurableIdempotencyStore, MemoryIdempotencyStore } from '../src/gateway/idempotency.js';
 import { signPayload } from '../src/security/hmac.js';
 import { normalizedEventSchema } from '../src/types/workflow.js';
 import { BEARER_TOKEN, buildTestGateway, type TestGateway } from './helpers/fixtures.js';
@@ -323,3 +324,53 @@ describe('webhook gateway: health, readiness, metrics and shutdown', () => {
     gw = null;
   });
 });
+
+describe('webhook gateway: durable idempotency (after the Redis key expires)', () => {
+  function durableGateway(lookup: (scope: string, key: string) => Promise<string | null>, onError?: (err: unknown) => void) {
+    const fast = new MemoryIdempotencyStore();
+    const store = new DurableIdempotencyStore(fast, lookup, { timeoutMs: 100, ...(onError ? { onLookupError: onError } : {}) });
+    return { fast, store };
+  }
+
+  it('rejects a post processed long ago even after its Redis key expired (polling / re-running sendExistingPosts)', async () => {
+    const recorded = new Map<string, string>(); // stands in for the idempotency_keys table written by the worker
+    const { fast, store } = durableGateway(async (scope, key) => recorded.get(`${scope}|${key}`) ?? null);
+    gw = await buildTestGateway({ deps: { idempotency: store } });
+
+    const first = await gw.app.inject({ method: 'POST', url: '/webhooks/blog', headers: auth, payload: post });
+    expect(first.statusCode).toBe(202);
+    recorded.set(`${gw.endpoint.id}|f:post-1`, first.json().eventId);
+
+    fast.expire(gw.endpoint.id, 'f:post-1'); // 24 h later: Redis forgot the key
+    const later = await gw.app.inject({ method: 'POST', url: '/webhooks/blog', headers: auth, payload: post });
+    expect(later.statusCode).toBe(200);
+    expect(later.json()).toMatchObject({ duplicate: true, eventId: first.json().eventId });
+    expect(gw.publisher.jobs).toHaveLength(1);
+
+    // The answer is cached again in the fast store, so the next duplicate skips the lookup.
+    const again = await gw.app.inject({ method: 'POST', url: '/webhooks/blog', headers: auth, payload: post });
+    expect(again.json().duplicate).toBe(true);
+  });
+
+  it('accepts new posts normally', async () => {
+    const { store } = durableGateway(async () => null);
+    gw = await buildTestGateway({ deps: { idempotency: store } });
+    expect((await gw.app.inject({ method: 'POST', url: '/webhooks/blog', headers: auth, payload: { ...post, id: 'brand-new' } })).statusCode).toBe(202);
+  });
+
+  it('stays available when the durable lookup fails or is slow (accepts on the Redis check)', async () => {
+    const errors: unknown[] = [];
+    const failing = durableGateway(async () => {
+      throw new Error('db down');
+    }, (e) => errors.push(e));
+    gw = await buildTestGateway({ deps: { idempotency: failing.store } });
+    expect((await gw.app.inject({ method: 'POST', url: '/webhooks/blog', headers: auth, payload: { ...post, id: 'a' } })).statusCode).toBe(202);
+    await gw.app.close();
+
+    const slow = durableGateway(() => new Promise((r) => setTimeout(() => r('old-event'), 1_000)), (e) => errors.push(e));
+    gw = await buildTestGateway({ deps: { idempotency: slow.store } });
+    expect((await gw.app.inject({ method: 'POST', url: '/webhooks/blog', headers: auth, payload: { ...post, id: 'b' } })).statusCode).toBe(202);
+    expect(errors).toHaveLength(2);
+  });
+});
+

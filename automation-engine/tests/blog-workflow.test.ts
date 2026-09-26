@@ -43,12 +43,25 @@ const workflow: RuntimeWorkflow = {
   })),
 };
 
+/** Returns why Telegram would reject the text, or null. Mirrors the Bot API HTML rules and limits. */
+function telegramTextProblem(text: string, html: boolean, limit: number): string | null {
+  let visible = text;
+  if (html) {
+    const allowed = /<\/?(b|strong|i|em|u|ins|s|strike|del|code|pre|blockquote|tg-spoiler)>|<a href="[^"<>]*">|<\/a>/g;
+    const withoutTags = text.replace(allowed, '');
+    if (/[<>]/.test(withoutTags)) return 'Unsupported start tag or stray "<"';
+    if (/&(?!(lt|gt|amp|quot);)/.test(withoutTags)) return 'Character entity expected';
+    visible = withoutTags.replace(/&(lt|gt|amp|quot);/g, 'x');
+  }
+  return visible.length > limit ? 'too_long' : null; // String.length counts UTF-16 code units, like Telegram
+}
+
 let telegram: TestServer;
 let client: TelegramClient;
 let engine: WorkflowEngine;
 
 beforeAll(async () => {
-  // Emulates Telegram's photo rules: non-URL -> "wrong file identifier", unreachable host -> "failed to get HTTP URL content".
+  // Emulates Telegram: photo rules, HTML parse mode rules and length limits (UTF-16 units after entity parsing).
   telegram = await startTestServer((req, res) => {
     const method = req.url.split('/').pop();
     const body = req.json ?? {};
@@ -63,7 +76,10 @@ beforeAll(async () => {
       }
       if (host.endsWith('.invalid')) return json(res, 400, { ok: false, error_code: 400, description: 'Bad Request: failed to get HTTP URL content' });
     }
-    if (method === 'sendMessage' && !body['text']) return json(res, 400, { ok: false, error_code: 400, description: 'Bad Request: message text is empty' });
+    const text = String((method === 'sendPhoto' ? body['caption'] : body['text']) ?? '');
+    const problem = telegramTextProblem(text, body['parse_mode'] === 'HTML', method === 'sendPhoto' ? 1024 : 4096);
+    if (problem) return json(res, 400, { ok: false, error_code: 400, description: problem === 'too_long' ? (method === 'sendPhoto' ? 'Bad Request: message caption is too long' : 'Bad Request: message is too long') : `Bad Request: can't parse entities: ${problem}` });
+    if (method === 'sendMessage' && !text.trim()) return json(res, 400, { ok: false, error_code: 400, description: 'Bad Request: message text is empty' });
     telegramOk(res, -1001234567890);
   });
   client = new TelegramClient({
@@ -182,4 +198,68 @@ describe('Blogger -> Telegram channel workflow (examples/blog-to-telegram.workfl
     const { calls } = await run(post({ title: 'Tips & <tricks>', image: '' }));
     expect(String(calls[0]!.body['text'])).toContain('<b>Tips &amp; &lt;tricks&gt;</b>');
   });
+
+  describe('message safety (Amharic, emoji, quotes, HTML, entities, long text)', () => {
+    const lastText = (calls: Array<{ method: string | undefined; body: Record<string, unknown> }>) => {
+      const last = calls.at(-1)!;
+      return String(last.method === 'sendPhoto' ? last.body['caption'] : last.body['text']);
+    };
+    const URL_ = 'https://yakobsendeku.blogspot.com/2026/09/post.html';
+
+    it('Amharic title and excerpt with emoji, quotes and entities go out as a valid photo caption', async () => {
+      const { outcome, calls } = await run(post({
+        title: 'ሰላም ዓለም 👋 “ጥቅስ” & it\'s <new>',
+        excerpt: '<p>ይህ የሙከራ ጽሑፍ ነው&nbsp;&amp; &#8217;apostrophe&#8217; &hellip; 😀</p><script>alert(1)</script>',
+      }));
+      expect(calls.map((c) => c.method)).toEqual(['sendPhoto']);
+      const caption = lastText(calls);
+      expect(caption).toContain('<b>ሰላም ዓለም 👋 “ጥቅስ” &amp; it\'s &lt;new&gt;</b>');
+      expect(caption).toContain('ይህ የሙከራ ጽሑፍ ነው &amp; ’apostrophe’ … 😀');
+      expect(caption).not.toContain('alert');
+      expect(caption).not.toContain('&#8217;');
+      expect(caption.endsWith(URL_)).toBe(true);
+      expect(outcome.steps[0]!.status).toBe('succeeded');
+    });
+
+    it('entity-encoded titles are decoded before escaping (no literal &amp; in Telegram)', async () => {
+      const { calls } = await run(post({ title: 'Tom &amp; Jerry&#8217;s &quot;day&quot;', image: '' }));
+      expect(lastText(calls)).toContain('<b>Tom &amp; Jerry’s &quot;day&quot;</b>');
+      expect(lastText(calls)).not.toContain('&amp;amp;');
+    });
+
+    it('very long Amharic title and excerpt are truncated to fit the 1024 caption limit, keeping the URL', async () => {
+      const { calls } = await run(post({ title: 'ረጅም ርዕስ '.repeat(60), excerpt: 'የኢትዮጵያ ታሪክ ረጅም ነው። '.repeat(300) }));
+      expect(calls.map((c) => c.method)).toEqual(['sendPhoto']);
+      const caption = lastText(calls);
+      expect(caption.endsWith(URL_)).toBe(true);
+      expect(caption).toContain('…');
+      expect(telegramTextProblem(caption, true, 1024)).toBeNull();
+    });
+
+    it('emoji-heavy excerpts that exceed the caption limit are still delivered (as text) with the URL', async () => {
+      const { outcome, calls } = await run(post({ excerpt: '😀'.repeat(900) }));
+      expect(calls.map((c) => c.method)).toEqual(['sendPhoto', 'sendMessage']);
+      expect(lastText(calls).endsWith(URL_)).toBe(true);
+      expect(outcome.steps[0]).toMatchObject({ status: 'succeeded', output: { fallback: 'sendMessage' } });
+    });
+
+    it('text messages stay under 4096 even for a huge emoji-only excerpt, keeping the URL', async () => {
+      const { outcome, calls } = await run(post({ image: '', title: '🔥'.repeat(300), excerpt: '😀'.repeat(5000) }));
+      expect(calls.map((c) => c.method)).toEqual(['sendMessage']);
+      const text = lastText(calls);
+      expect(telegramTextProblem(text, true, 4096)).toBeNull();
+      expect(text.endsWith(URL_)).toBe(true);
+      expect(outcome.steps.at(-1)!.status).toBe('succeeded');
+    });
+
+    it('markup-looking text in titles and Blogger HTML never produces invalid Telegram HTML', async () => {
+      for (const title of ['a < b && c > d', '<b>bold?</b>', '&amp;&lt;script&gt;', 'Tom & "Jerry"', '5 > 3 & 2 < 4']) {
+        const { outcome, calls } = await run(post({ title, excerpt: '<div><b>unclosed <i>tags & stray < signs</div>', image: '' }));
+        expect(outcome.steps.at(-1)!.status).toBe('succeeded');
+        expect(telegramTextProblem(lastText(calls), true, 4096)).toBeNull();
+        telegram.requests.length = 0;
+      }
+    });
+  });
 });
+

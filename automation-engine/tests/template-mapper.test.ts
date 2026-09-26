@@ -231,3 +231,13 @@ describe('http_url filter', () => {
   });
 });
 
+describe('strip_html and decode_entities (Blogger content)', () => {
+  it('decodes numeric and common named entities, drops scripts/styles/comments, tidies whitespace', () => {
+    const html = '<div>ሰላም&nbsp;&nbsp;ዓለም &#4608; &#x1F600; It&#8217;s &hellip;</div><script>alert(1)</script><style>p{}</style><!-- c --><p>Line&nbsp;2</p>&bogus;';
+    expect(renderTemplate('{{trigger.body.x | strip_html}}', { trigger: { body: { x: html } } })).toBe('ሰላም ዓለም ሀ 😀 It’s …\nLine 2\n&bogus;');
+  });
+  it('decode_entities keeps unknown and invalid entities as they are', () => {
+    expect(renderTemplate('{{trigger.body.x | decode_entities}}', { trigger: { body: { x: 'A &amp; B &#0; &#xD800; &unknown; &lt;' } } })).toBe('A & B &#0; &#xD800; &unknown; <');
+  });
+});
+

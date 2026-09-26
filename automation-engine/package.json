@@ -25,7 +25,8 @@
     "test:watch": "vitest",
     "test:integration": "INTEGRATION_REDIS_URL=${INTEGRATION_REDIS_URL:-redis://localhost:6379/15} vitest run tests/integration",
     "bench:mapper": "vitest bench --run",
-    "bench:load": "tsx bench/load-test.ts"
+    "bench:load": "tsx bench/load-test.ts",
+    "telegram:check": "tsx --env-file-if-exists=.env src/scripts/check-telegram.ts"
   },
   "dependencies": {
     "@fastify/rate-limit": "^10.3.0",

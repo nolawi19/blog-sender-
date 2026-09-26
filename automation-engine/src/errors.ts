@@ -233,6 +233,11 @@ export interface SerializedError {
   retryable: boolean;
   retryAfterMs?: number;
   details?: Record<string, unknown>;
+  /** Key and type of the workflow step that failed, when known. */
+  failedStep?: string;
+  failedStepType?: string;
+  /** What happens next: another attempt, dead-letter store, or postponed (rate limit). */
+  retryStatus?: 'retry_scheduled' | 'dead_lettered' | 'postponed_rate_limit';
 }
 
 /** JSON-safe, secret-free representation used for logs, execution rows and the DLQ. */

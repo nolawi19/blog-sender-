@@ -1,0 +1,391 @@
+{
+ "version": "1.0",
+ "encoding": "UTF-8",
+ "feed": {
+  "xmlns": "http://www.w3.org/2005/Atom",
+  "id": {
+   "$t": "tag:blogger.com,1999:blog-4242424242424242424"
+  },
+  "title": {
+   "type": "text",
+   "$t": "Yakob Sendeku"
+  },
+  "openSearch$totalResults": {
+   "$t": "6"
+  },
+  "openSearch$startIndex": {
+   "$t": "1"
+  },
+  "openSearch$itemsPerPage": {
+   "$t": "25"
+  },
+  "entry": [
+   {
+    "id": {
+     "$t": "tag:blogger.com,1999:blog-4242424242424242424.post-7000000000000000006"
+    },
+    "published": {
+     "$t": "2026-09-26T10:00:00.000-07:00"
+    },
+    "updated": {
+     "$t": "2026-09-26T10:00:00.000-07:00"
+    },
+    "title": {
+     "type": "text",
+     "$t": "ሰላም ዓለም 👋 — አዲስ ጽሑፍ"
+    },
+    "content": {
+     "type": "html",
+     "$t": "<div class=\"separator\"><a href=\"https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiTESTIMAGE/s1600/cover.jpg\"><img border=\"0\" data-original-height=\"630\" height=\"225\" src=\"https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiTESTIMAGE/s320/cover.jpg\" width=\"400\" /></a></div><p>ይህ የሙከራ ጽሑፍ ነው&nbsp;&amp; “ጥቅሶች” እና &#8217;apostrophes&#8217; 😀</p>"
+    },
+    "link": [
+     {
+      "rel": "replies",
+      "type": "application/atom+xml",
+      "href": "https://yakobsendeku.blogspot.com/feeds/7000000000000000006/comments/default",
+      "title": "Post Comments"
+     },
+     {
+      "rel": "edit",
+      "type": "application/atom+xml",
+      "href": "https://www.blogger.com/feeds/4242424242424242424/posts/default/7000000000000000006"
+     },
+     {
+      "rel": "self",
+      "type": "application/atom+xml",
+      "href": "https://www.blogger.com/feeds/4242424242424242424/posts/default/7000000000000000006"
+     },
+     {
+      "rel": "alternate",
+      "type": "text/html",
+      "href": "https://yakobsendeku.blogspot.com/2026/09/post-0006.html",
+      "title": "ሰላም ዓለም 👋 — አዲስ ጽሑፍ"
+     }
+    ],
+    "author": [
+     {
+      "name": {
+       "$t": "Nolawi"
+      },
+      "uri": {
+       "$t": "https://www.blogger.com/profile/000"
+      },
+      "email": {
+       "$t": "noreply@blogger.com"
+      }
+     }
+    ],
+    "thr$total": {
+     "$t": "0"
+    },
+    "media$thumbnail": {
+     "xmlns$media": "http://search.yahoo.com/mrss/",
+     "url": "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiTESTIMAGE/s72-c/cover.jpg",
+     "height": "72",
+     "width": "72"
+    }
+   },
+   {
+    "id": {
+     "$t": "tag:blogger.com,1999:blog-4242424242424242424.post-7000000000000000005"
+    },
+    "published": {
+     "$t": "2026-09-25T09:00:00.000-07:00"
+    },
+    "updated": {
+     "$t": "2026-09-25T09:00:00.000-07:00"
+    },
+    "title": {
+     "type": "text",
+     "$t": "Tips & \"tricks\" for <HTML> it's fine"
+    },
+    "content": {
+     "type": "html",
+     "$t": "<p>No image in this one. It&#39;s got <b>bold</b>, <i>italics</i> &amp; a <a href='https://x.example'>link</a>.</p><script>alert('x')</script>"
+    },
+    "link": [
+     {
+      "rel": "replies",
+      "type": "application/atom+xml",
+      "href": "https://yakobsendeku.blogspot.com/feeds/7000000000000000005/comments/default",
+      "title": "Post Comments"
+     },
+     {
+      "rel": "edit",
+      "type": "application/atom+xml",
+      "href": "https://www.blogger.com/feeds/4242424242424242424/posts/default/7000000000000000005"
+     },
+     {
+      "rel": "self",
+      "type": "application/atom+xml",
+      "href": "https://www.blogger.com/feeds/4242424242424242424/posts/default/7000000000000000005"
+     },
+     {
+      "rel": "alternate",
+      "type": "text/html",
+      "href": "https://yakobsendeku.blogspot.com/2026/09/post-0005.html",
+      "title": "Tips & \"tricks\" for <HTML> it's fine"
+     }
+    ],
+    "author": [
+     {
+      "name": {
+       "$t": "Nolawi"
+      },
+      "uri": {
+       "$t": "https://www.blogger.com/profile/000"
+      },
+      "email": {
+       "$t": "noreply@blogger.com"
+      }
+     }
+    ],
+    "thr$total": {
+     "$t": "0"
+    }
+   },
+   {
+    "id": {
+     "$t": "tag:blogger.com,1999:blog-4242424242424242424.post-7000000000000000004"
+    },
+    "published": {
+     "$t": "2026-09-24T08:00:00.000-07:00"
+    },
+    "updated": {
+     "$t": "2026-09-24T08:00:00.000-07:00"
+    },
+    "title": {
+     "type": "text",
+     "$t": "Malformed image post"
+    },
+    "content": {
+     "type": "html",
+     "$t": "<p><img src=\"data:image/png;base64,iVBORw0KGgo=\" /><img src=\"https://pixel.example.com/t.gif\" width=\"1\" height=\"1\" /><img src=\"not a url\" />Text only really.</p>"
+    },
+    "link": [
+     {
+      "rel": "replies",
+      "type": "application/atom+xml",
+      "href": "https://yakobsendeku.blogspot.com/feeds/7000000000000000004/comments/default",
+      "title": "Post Comments"
+     },
+     {
+      "rel": "edit",
+      "type": "application/atom+xml",
+      "href": "https://www.blogger.com/feeds/4242424242424242424/posts/default/7000000000000000004"
+     },
+     {
+      "rel": "self",
+      "type": "application/atom+xml",
+      "href": "https://www.blogger.com/feeds/4242424242424242424/posts/default/7000000000000000004"
+     },
+     {
+      "rel": "alternate",
+      "type": "text/html",
+      "href": "https://yakobsendeku.blogspot.com/2026/09/post-0004.html",
+      "title": "Malformed image post"
+     }
+    ],
+    "author": [
+     {
+      "name": {
+       "$t": "Nolawi"
+      },
+      "uri": {
+       "$t": "https://www.blogger.com/profile/000"
+      },
+      "email": {
+       "$t": "noreply@blogger.com"
+      }
+     }
+    ],
+    "thr$total": {
+     "$t": "0"
+    }
+   },
+   {
+    "id": {
+     "$t": "tag:blogger.com,1999:blog-4242424242424242424.post-7000000000000000003"
+    },
+    "published": {
+     "$t": "2026-09-23T07:00:00.000-07:00"
+    },
+    "updated": {
+     "$t": "2026-09-23T07:00:00.000-07:00"
+    },
+    "title": {
+     "type": "text",
+     "$t": "Thumbnail only (summary feed)"
+    },
+    "summary": {
+     "type": "html",
+     "$t": "Short summary without images…"
+    },
+    "link": [
+     {
+      "rel": "replies",
+      "type": "application/atom+xml",
+      "href": "https://yakobsendeku.blogspot.com/feeds/7000000000000000003/comments/default",
+      "title": "Post Comments"
+     },
+     {
+      "rel": "edit",
+      "type": "application/atom+xml",
+      "href": "https://www.blogger.com/feeds/4242424242424242424/posts/default/7000000000000000003"
+     },
+     {
+      "rel": "self",
+      "type": "application/atom+xml",
+      "href": "https://www.blogger.com/feeds/4242424242424242424/posts/default/7000000000000000003"
+     },
+     {
+      "rel": "alternate",
+      "type": "text/html",
+      "href": "https://yakobsendeku.blogspot.com/2026/09/post-0003.html",
+      "title": "Thumbnail only (summary feed)"
+     }
+    ],
+    "author": [
+     {
+      "name": {
+       "$t": "Nolawi"
+      },
+      "uri": {
+       "$t": "https://www.blogger.com/profile/000"
+      },
+      "email": {
+       "$t": "noreply@blogger.com"
+      }
+     }
+    ],
+    "thr$total": {
+     "$t": "0"
+    },
+    "media$thumbnail": {
+     "xmlns$media": "http://search.yahoo.com/mrss/",
+     "url": "https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiTHUMB/s72-w640-h360-c/thumb.png",
+     "height": "72",
+     "width": "72"
+    }
+   },
+   {
+    "id": {
+     "$t": "tag:blogger.com,1999:blog-4242424242424242424.post-7000000000000000002"
+    },
+    "published": {
+     "$t": "2026-09-22T06:00:00.000-07:00"
+    },
+    "updated": {
+     "$t": "2026-09-22T06:00:00.000-07:00"
+    },
+    "title": {
+     "type": "text",
+     "$t": "ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ "
+    },
+    "content": {
+     "type": "html",
+     "$t": "<p>የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። የኢትዮጵያ ታሪክ ረጅም እና ብዙ ገጽታ ያለው ነው። </p>"
+    },
+    "link": [
+     {
+      "rel": "replies",
+      "type": "application/atom+xml",
+      "href": "https://yakobsendeku.blogspot.com/feeds/7000000000000000002/comments/default",
+      "title": "Post Comments"
+     },
+     {
+      "rel": "edit",
+      "type": "application/atom+xml",
+      "href": "https://www.blogger.com/feeds/4242424242424242424/posts/default/7000000000000000002"
+     },
+     {
+      "rel": "self",
+      "type": "application/atom+xml",
+      "href": "https://www.blogger.com/feeds/4242424242424242424/posts/default/7000000000000000002"
+     },
+     {
+      "rel": "alternate",
+      "type": "text/html",
+      "href": "https://yakobsendeku.blogspot.com/2026/09/post-0002.html",
+      "title": "ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ ረጅም ርዕስ "
+     }
+    ],
+    "author": [
+     {
+      "name": {
+       "$t": "Nolawi"
+      },
+      "uri": {
+       "$t": "https://www.blogger.com/profile/000"
+      },
+      "email": {
+       "$t": "noreply@blogger.com"
+      }
+     }
+    ],
+    "thr$total": {
+     "$t": "0"
+    }
+   },
+   {
+    "id": {
+     "$t": "tag:blogger.com,1999:blog-4242424242424242424.post-7000000000000000001"
+    },
+    "published": {
+     "$t": "2026-09-21T05:00:00.000-07:00"
+    },
+    "updated": {
+     "$t": "2026-09-21T05:00:00.000-07:00"
+    },
+    "title": {
+     "type": "text",
+     "$t": "Protocol-relative image"
+    },
+    "content": {
+     "type": "html",
+     "$t": "<p><img src=\"//1.bp.blogspot.com/-abc/XYZ/AAAA/s320/photo.jpg\" />Old blogspot image host.</p>"
+    },
+    "link": [
+     {
+      "rel": "replies",
+      "type": "application/atom+xml",
+      "href": "https://yakobsendeku.blogspot.com/feeds/7000000000000000001/comments/default",
+      "title": "Post Comments"
+     },
+     {
+      "rel": "edit",
+      "type": "application/atom+xml",
+      "href": "https://www.blogger.com/feeds/4242424242424242424/posts/default/7000000000000000001"
+     },
+     {
+      "rel": "self",
+      "type": "application/atom+xml",
+      "href": "https://www.blogger.com/feeds/4242424242424242424/posts/default/7000000000000000001"
+     },
+     {
+      "rel": "alternate",
+      "type": "text/html",
+      "href": "https://yakobsendeku.blogspot.com/2026/09/post-0001.html",
+      "title": "Protocol-relative image"
+     }
+    ],
+    "author": [
+     {
+      "name": {
+       "$t": "Nolawi"
+      },
+      "uri": {
+       "$t": "https://www.blogger.com/profile/000"
+      },
+      "email": {
+       "$t": "noreply@blogger.com"
+      }
+     }
+    ],
+    "thr$total": {
+     "$t": "0"
+    }
+   }
+  ]
+ }
+}

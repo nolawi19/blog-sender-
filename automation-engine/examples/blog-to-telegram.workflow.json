@@ -25,7 +25,7 @@
             "photo": "{{trigger.body.image | http_url}}",
             "parseMode": "HTML",
             "fallbackToMessage": true,
-            "caption": "<b>{{trigger.body.title | default:\"New post\" | truncate:200 | escape_html}}</b>\n\n{{trigger.body.excerpt | strip_html | truncate:600 | escape_html}}\n\n{{trigger.body.url | escape_html}}"
+            "caption": "<b>{{trigger.body.title | default:\"New post\" | decode_entities | truncate:200 | escape_html}}</b>\n\n{{trigger.body.excerpt | strip_html | truncate:600 | escape_html}}\n\n{{trigger.body.url | escape_html}}"
           }
         },
         {
@@ -36,7 +36,7 @@
           "config": {
             "parseMode": "HTML",
             "disableWebPagePreview": false,
-            "text": "<b>{{trigger.body.title | default:\"New post\" | truncate:200 | escape_html}}</b>\n\n{{trigger.body.excerpt | strip_html | truncate:3000 | escape_html}}\n\n{{trigger.body.url | escape_html}}"
+            "text": "<b>{{trigger.body.title | default:\"New post\" | decode_entities | truncate:200 | escape_html}}</b>\n\n{{trigger.body.excerpt | strip_html | truncate:1500 | escape_html}}\n\n{{trigger.body.url | escape_html}}"
           }
         }
       ]

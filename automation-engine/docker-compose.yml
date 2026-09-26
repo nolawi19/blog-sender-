@@ -134,6 +134,7 @@ services:
       MOCK_FAIL_FIRST: ${MOCK_FAIL_FIRST:-0}
       MOCK_ERROR_RATE: ${MOCK_ERROR_RATE:-0}
       MOCK_RATE_LIMIT_RATE: ${MOCK_RATE_LIMIT_RATE:-0}
+      MOCK_BOT_NOT_ADMIN: ${MOCK_BOT_NOT_ADMIN:-0}
     expose: ["8081"]
     depends_on: []
 
