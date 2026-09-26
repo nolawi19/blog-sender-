@@ -246,3 +246,83 @@ describe('Telegram driver and secret handling', () => {
     expect(output).not.toContain(BOT_TOKEN);
   });
 });
+
+describe('Telegram channel destination and photo fallback', () => {
+  const CHANNEL = '@automation_test_channel';
+  function ctx(): ActionContext {
+    return {
+      signal: AbortSignal.timeout(2_000),
+      logger: silentLogger(),
+      credential: null,
+      executionId: 'e1',
+      workflowId: 'w1',
+      stepId: 's1',
+      stepKey: 'announce',
+      attempt: 1,
+      markRequestStart: () => undefined,
+      markResponse: () => undefined,
+    };
+  }
+  const driver = () => createTelegramDriver(makeClient(), { defaultBotToken: BOT_TOKEN, defaultChatId: CHANNEL });
+  const action = (type: string) => driver().actions.find((a) => a.type === type)!;
+
+  it('sends to TELEGRAM_CHANNEL_ID when the step has no chatId', async () => {
+    await action('telegram.sendMessage').run({ text: 'hello' }, ctx());
+    expect(server.requests[0]!.json?.['chat_id']).toBe(CHANNEL);
+  });
+
+  it('treats an empty chatId as "use the channel" instead of failing validation', async () => {
+    await action('telegram.sendPhoto').run({ chatId: '', photo: 'https://example.com/a.jpg', caption: 'c' }, ctx());
+    expect(server.requests[0]!.json?.['chat_id']).toBe(CHANNEL);
+  });
+
+  it('an explicit chatId still wins over the channel default', async () => {
+    await action('telegram.sendMessage').run({ chatId: '@other_channel', text: 'x' }, ctx());
+    expect(server.requests[0]!.json?.['chat_id']).toBe('@other_channel');
+  });
+
+  it('fails clearly (by variable name) when no destination is configured', async () => {
+    const noChannel = createTelegramDriver(makeClient(), { defaultBotToken: BOT_TOKEN });
+    const err = await noChannel.actions[0]!.run({ text: 'x' }, ctx()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConfigurationError);
+    expect((err as ConfigurationError).code).toBe('TELEGRAM_CHAT_MISSING');
+    expect((err as Error).message).toContain('TELEGRAM_CHANNEL_ID');
+    expect(server.requests).toHaveLength(0);
+  });
+
+  it('with fallbackToMessage, an empty photo sends the caption as text and never calls sendPhoto', async () => {
+    const result = await action('telegram.sendPhoto').run({ photo: '', caption: '<b>Title</b>', parseMode: 'HTML', fallbackToMessage: true }, ctx());
+    expect(server.requests.map((r) => r.url.split('/').pop())).toEqual(['sendMessage']);
+    expect(server.requests[0]!.json).toMatchObject({ chat_id: CHANNEL, text: '<b>Title</b>', parse_mode: 'HTML' });
+    expect(result.output).toMatchObject({ fallback: 'sendMessage', fallbackReason: 'missing_photo' });
+  });
+
+  it.each(['Bad Request: failed to get HTTP URL content', 'Bad Request: wrong file identifier/HTTP URL specified', 'Bad Request: wrong type of the web page content', 'Bad Request: message caption is too long'])(
+    'with fallbackToMessage, Telegram "%s" falls back to sendMessage',
+    async (description) => {
+      server.setHandler((req, res) =>
+        req.url.endsWith('/sendPhoto') ? json(res, 400, { ok: false, error_code: 400, description }) : telegramOk(res, -1001234567890),
+      );
+      const result = await action('telegram.sendPhoto').run({ photo: 'https://example.com/a.jpg', caption: 'Title', fallbackToMessage: true }, ctx());
+      expect(server.requests.map((r) => r.url.split('/').pop())).toEqual(['sendPhoto', 'sendMessage']);
+      expect(result.output).toMatchObject({ fallback: 'sendMessage' });
+    },
+  );
+
+  it('does not hide unrelated errors behind the fallback (e.g. chat not found)', async () => {
+    server.setHandler((_req, res) => json(res, 400, { ok: false, error_code: 400, description: 'Bad Request: chat not found' }));
+    const err = await action('telegram.sendPhoto').run({ photo: 'https://example.com/a.jpg', caption: 'Title', fallbackToMessage: true }, ctx()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ExternalApiError);
+    expect(server.requests).toHaveLength(1);
+  });
+
+  it('without fallbackToMessage the original validation is unchanged', async () => {
+    const err = await action('telegram.sendPhoto').run({ photo: '', caption: 'x' }, ctx()).catch((e: unknown) => e);
+    expect((err as ConfigurationError).code).toBe('STEP_CONFIG_INVALID');
+    expect(JSON.stringify((err as ConfigurationError).details)).toContain('photo must not be empty');
+    const noCaption = await action('telegram.sendPhoto').run({ photo: '', fallbackToMessage: true }, ctx()).catch((e: unknown) => e);
+    expect(JSON.stringify((noCaption as ConfigurationError).details)).toContain('caption is required');
+    expect(server.requests).toHaveLength(0);
+  });
+});
+

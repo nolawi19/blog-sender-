@@ -1,5 +1,5 @@
 # Automation engine stack: gateway, worker, Redis, PostgreSQL.
-#   cp .env.example .env   # fill ENCRYPTION_KEY, WEBHOOK_SECRET, TELEGRAM_BOT_TOKEN
+#   cp .env.example .env   # fill ENCRYPTION_KEY, WEBHOOK_SECRET, TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID
 #   docker compose up -d --build
 #   docker compose up -d --scale worker=3          # horizontal scaling
 #   docker compose --profile bench up -d mock-telegram   # local Telegram mock
@@ -87,7 +87,8 @@ services:
   gateway:
     <<: *app
     command: ["node", "dist/server.js"]
-    ports: ["${PORT:-3000}:3000"]
+    # Host port 3001 (3000 is used by another site on this machine); container port stays 3000.
+    ports: ["3001:3000"]
     environment:
       <<: *app-env
       PORT: 3000

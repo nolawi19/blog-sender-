@@ -1,0 +1,9 @@
+{
+  "id": "test-post-invalid-image",
+  "type": "post.published",
+  "title": "Automation engine test: post with an INVALID image value",
+  "excerpt": "The image value is not a URL, so the engine should skip sendPhoto and send a text message.",
+  "url": "https://yakobsendeku.blogspot.com/",
+  "image": "not-a-valid-image-url",
+  "author": { "name": "Nolawi" }
+}

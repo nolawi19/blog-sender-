@@ -44,7 +44,7 @@ Every stage is measured with high-resolution timestamps (`performance.now()` anc
 | `execution_duration` | worker pickup → job finished |
 | `total_execution` | webhook receipt → job finished |
 
-Human-readable snapshot: `GET /metrics/latency` on the gateway (`:3000`) and worker (`:9464`). Each execution row in PostgreSQL also stores `queue_latency_ms`, `outbound_start_latency_ms`, `execution_duration_ms` and `total_latency_ms`.
+Human-readable snapshot: `GET /metrics/latency` on the gateway (`http://localhost:3001` with Docker Compose; port 3000 inside the container) and worker (`:9464`). Each execution row in PostgreSQL also stores `queue_latency_ms`, `outbound_start_latency_ms`, `execution_duration_ms` and `total_latency_ms`.
 
 ### Measured results (from a real run — reproduce with the commands in [Benchmarks](#benchmarks))
 
@@ -132,6 +132,7 @@ cp .env.example .env
 sed -i "s/^ENCRYPTION_KEY=.*/ENCRYPTION_KEY=$(openssl rand -hex 32)/" .env
 sed -i "s/^WEBHOOK_SECRET=.*/WEBHOOK_SECRET=$(openssl rand -hex 32)/" .env
 # Then edit .env and set TELEGRAM_BOT_TOKEN=<token from BotFather>
+# and TELEGRAM_CHANNEL_ID=<@yourchannel or -100… channel ID> (the bot must be a channel admin)
 
 # Build and start PostgreSQL, Redis, migrations, gateway and worker
 docker compose up -d --build
@@ -151,7 +152,7 @@ Send a test webhook:
 export TELEGRAM_CHAT_ID=<your chat id>
 sed "s/REPLACE_WITH_YOUR_CHAT_ID/$TELEGRAM_CHAT_ID/" examples/post-published.json > /tmp/post.json
 
-curl -i -X POST http://localhost:3000/webhooks/blog \
+curl -i -X POST http://localhost:3001/webhooks/blog \
   -H 'content-type: application/json' \
   -H "authorization: Bearer $WEBHOOK_TOKEN" \
   --data-binary @/tmp/post.json
@@ -168,9 +169,23 @@ docker compose logs worker | grep '"execution succeeded"' | tail -1
 docker compose exec postgres psql -U automation -d automation -c \
   "select status, attempts, queue_latency_ms, outbound_start_latency_ms, total_latency_ms from executions order by created_at desc limit 5;"
 # 4. Latency percentiles:
-curl -s localhost:3000/metrics/latency
+curl -s localhost:3001/metrics/latency
 docker compose exec worker node -e "fetch('http://127.0.0.1:9464/metrics/latency').then(r=>r.text()).then(console.log)"
 ```
+
+The gateway is published on host port **3001** (`3001:3000` in `docker-compose.yml`), so `http://localhost:3001/health` must return 200.
+
+### Blogger → Telegram channel
+
+`examples/blog-to-telegram.workflow.json` posts every `post.published` event to the channel in `TELEGRAM_CHANNEL_ID`:
+
+- **Post with a usable image** (`image` is an absolute http(s) URL): `telegram.sendPhoto` with the image and a caption containing the title, the excerpt (HTML stripped, truncated) and the post URL.
+- **Post without an image** (`image` empty, missing, `null` or not a URL): `telegram.sendMessage` with the same title, excerpt and URL; `sendPhoto` is never called.
+- **Image URL Telegram cannot use** (unreachable, not an image, caption too long): the photo step sends the caption as a text message instead (`fallbackToMessage`), so the execution still succeeds.
+
+The destination comes from `TELEGRAM_CHANNEL_ID` (`@channelusername` for a public channel, or the `-100…` channel ID); the Blogger payload does not need to carry a chat ID. Personal chat IDs are rejected at startup. Test payloads for each case are in `examples/test-post-*.json`.
+
+Posts that were dead-lettered before a fix cannot be re-sent from the Apps Script (their `id` is already recorded for idempotency). Requeue them instead: `docker compose run --rm gateway node dist/scripts/requeue-dead-letters.js --list`, then `--id <id>` or `--all`. They run with the current workflow version.
 
 Scale workers horizontally: `docker compose up -d --scale worker=3`.
 Stop gracefully (drains in-flight requests and jobs): `docker compose stop`.
@@ -186,7 +201,7 @@ cp .env.example .env                        # set ENCRYPTION_KEY, WEBHOOK_SECRET
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres redis
 
 npm run db:migrate                          # prisma migrate deploy
-npm run dev:gateway                         # terminal 1 (http://localhost:3000)
+npm run dev:gateway                         # terminal 1 (listens on PORT from .env; use PORT=3001 if 3000 is taken)
 npm run dev:worker                          # terminal 2 (metrics on :9464)
 npm run workflow:create -- examples/blog-to-telegram.workflow.json
 ```
@@ -201,7 +216,7 @@ Production-style on the host: `npm run build && npm run start:gateway` and `npm 
 
 ```bash
 for i in 1 2; do
-  curl -s -X POST localhost:3000/webhooks/blog -H 'content-type: application/json' \
+  curl -s -X POST localhost:3001/webhooks/blog -H 'content-type: application/json' \
     -H "authorization: Bearer $WEBHOOK_TOKEN" --data-binary @/tmp/post.json; echo
 done
 # 1st: 202 {"duplicate":false,"eventId":"X",…}
@@ -216,7 +231,7 @@ Key precedence: `Idempotency-Key` header → `X-Event-Id` header → the endpoin
 # In .env: TELEGRAM_API_BASE_URL=http://mock-telegram:8081   (host dev: http://localhost:8081)
 MOCK_FAIL_FIRST=2 docker compose --profile bench up -d mock-telegram
 docker compose up -d worker                  # pick up the new base URL
-curl -s -X POST localhost:3000/webhooks/blog -H 'content-type: application/json' \
+curl -s -X POST localhost:3001/webhooks/blog -H 'content-type: application/json' \
   -H "authorization: Bearer $WEBHOOK_TOKEN" \
   --data-binary '{"id":"retry-demo","title":"Retry demo","image":"https://example.com/a.jpg","telegram_chat_id":"42"}'
 docker compose logs worker | grep -E 'retry scheduled|execution succeeded' | tail -3
@@ -229,7 +244,7 @@ Host development equivalent: `MOCK_FAIL_FIRST=2 npm run mock:telegram` and resta
 
 ```bash
 MOCK_ERROR_RATE=1 docker compose --profile bench up -d mock-telegram      # every call fails with 500
-curl -s -X POST localhost:3000/webhooks/blog -H 'content-type: application/json' \
+curl -s -X POST localhost:3001/webhooks/blog -H 'content-type: application/json' \
   -H "authorization: Bearer $WEBHOOK_TOKEN" \
   --data-binary '{"id":"dlq-demo","title":"DLQ demo","image":"https://example.com/a.jpg","telegram_chat_id":"42"}'
 # after MAX_RETRIES+1 attempts (default backoff: up to 1 s, 2 s, 4 s, 8 s, 16 s; each delay is jittered between 50% and 100%):
@@ -253,7 +268,7 @@ WEBHOOK_SECRET=$(grep '^WEBHOOK_SECRET=' .env | cut -d= -f2-)
 BODY=$(cat /tmp/post.json)
 TS=$(date +%s)
 SIG=$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" -hex | sed 's/^.* //')
-curl -i -X POST localhost:3000/webhooks/blog-signed -H 'content-type: application/json' \
+curl -i -X POST localhost:3001/webhooks/blog-signed -H 'content-type: application/json' \
   -H "x-webhook-timestamp: $TS" -H "x-webhook-signature: sha256=$SIG" --data-binary "$BODY"
 ```
 
@@ -337,6 +352,7 @@ A definition file (see `examples/`) contains an owner, credentials (values read 
 - `trigger.event` matches the event type (`X-Event-Type` header → `body.type` → `body.event` → endpoint default); `"*"` matches everything.
 - Steps run in order; each step's output is available to later steps as `{{steps.<key>.output...}}`.
 - Optional per step: `runIf` (template; the step runs only if it renders truthy), `timeoutMs`, `credential`.
+- Telegram steps without `chatId` (or with an empty one) send to `TELEGRAM_CHANNEL_ID`. `telegram.sendPhoto` accepts `"fallbackToMessage": true` to deliver the caption as text when the photo is missing or rejected by Telegram.
 - Re-running `create-workflow` updates the workflow (version + 1) and tells running processes to reload.
 
 Every job receives this normalized event as `trigger`:
@@ -367,7 +383,7 @@ Credential-bearing headers are redacted unless `WEBHOOK_FORWARD_SENSITIVE_HEADER
 | `{{ path \| filter \| filter:arg }}` | filters, applied left to right |
 | `\{{` | literal `{{` |
 
-Filters: `default:"x"`, `escape_html`, `escape_markdown` (Telegram MarkdownV2), `strip_html`, `truncate:N` (code-point safe), `upper`, `lower`, `trim`, `json`, `url_encode`, `join:", "`, `first`, `number`, `string`, `not`.
+Filters: `default:"x"`, `escape_html`, `escape_markdown` (Telegram MarkdownV2), `strip_html`, `truncate:N` (code-point safe), `upper`, `lower`, `trim`, `json`, `url_encode`, `join:", "`, `first`, `number`, `string`, `not`, `http_url` (the value if it is an absolute http(s) URL, otherwise empty; `//host/…` becomes `https://host/…`).
 
 Semantics: a template that is exactly one expression keeps the value's type (number, boolean, object); otherwise the result is a string. Missing and null values render as `""` inside strings, and config keys whose single expression is missing/null are omitted (so optional Telegram fields disappear). Templates are compiled when workflows load; syntax errors surface then. No `eval`/`Function`; only the roots `trigger`, `steps`, `workflow`, `execution` are reachable, own properties only, and `__proto__`/`prototype`/`constructor` are rejected.
 
@@ -458,6 +474,7 @@ All variables are documented in [`.env.example`](.env.example) and validated at 
 | `WEBHOOK_SECRET` | — | default HMAC secret (min 16 chars) |
 | `ENCRYPTION_KEY` | — | 32-byte key (64 hex chars) for credential encryption |
 | `TELEGRAM_BOT_TOKEN` | — | fallback bot token for steps without a credential |
+| `TELEGRAM_CHANNEL_ID` | — | default destination: `@channelusername` or `-100…` channel ID |
 | `HTTP_TIMEOUT_MS` | `10000` | outbound headers/body timeout |
 | `MAX_RETRIES` | `5` | retries after the first attempt |
 | `LOG_LEVEL` | `info` | Pino level |

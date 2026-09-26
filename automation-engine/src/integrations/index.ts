@@ -8,6 +8,7 @@ export type IntegrationConfig = Pick<
   Config,
   | 'TELEGRAM_API_BASE_URL'
   | 'TELEGRAM_BOT_TOKEN'
+  | 'TELEGRAM_CHANNEL_ID'
   | 'TELEGRAM_POOL_CONNECTIONS'
   | 'TELEGRAM_WARMUP_CONNECTIONS'
   | 'TELEGRAM_KEEP_WARM_INTERVAL_MS'
@@ -45,7 +46,7 @@ export function createDefaultRegistry(config: IntegrationConfig, logger: Logger)
   });
 
   return new DriverRegistry()
-    .register(createTelegramDriver(telegram, { defaultBotToken: config.TELEGRAM_BOT_TOKEN }))
+    .register(createTelegramDriver(telegram, { defaultBotToken: config.TELEGRAM_BOT_TOKEN, defaultChatId: config.TELEGRAM_CHANNEL_ID }))
     .register(
       createHttpDriver({
         timeoutMs: config.HTTP_TIMEOUT_MS,

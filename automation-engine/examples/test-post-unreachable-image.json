@@ -1,0 +1,9 @@
+{
+  "id": "test-post-unreachable-image",
+  "type": "post.published",
+  "title": "Automation engine test: post with an UNREACHABLE image",
+  "excerpt": "The image URL looks valid but cannot be downloaded, so Telegram rejects the photo and the engine should send a text message instead.",
+  "url": "https://yakobsendeku.blogspot.com/",
+  "image": "https://images.invalid/cover.jpg",
+  "author": { "name": "Nolawi" }
+}

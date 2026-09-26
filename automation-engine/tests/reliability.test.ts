@@ -64,6 +64,24 @@ describe('configuration', () => {
     expect(() => loadConfig({ ...TEST_ENV, ENCRYPTION_KEY: 'nope' })).toThrow(/ENCRYPTION_KEY/);
     expect(() => loadConfig({ ...TEST_ENV, DATABASE_URL: undefined })).toThrow(/DATABASE_URL/);
   });
+
+  it('accepts only Telegram channel destinations in TELEGRAM_CHANNEL_ID', () => {
+    expect(loadConfig(TEST_ENV).TELEGRAM_CHANNEL_ID).toBeUndefined();
+    expect(loadConfig({ ...TEST_ENV, TELEGRAM_CHANNEL_ID: '' }).TELEGRAM_CHANNEL_ID).toBeUndefined();
+    expect(loadConfig({ ...TEST_ENV, TELEGRAM_CHANNEL_ID: '@my_channel' }).TELEGRAM_CHANNEL_ID).toBe('@my_channel');
+    expect(loadConfig({ ...TEST_ENV, TELEGRAM_CHANNEL_ID: ' -1001234567890 ' }).TELEGRAM_CHANNEL_ID).toBe('-1001234567890');
+    for (const bad of ['123456789', '-123456', 'my_channel', '@abc', 'https://t.me/my_channel']) {
+      expect(() => loadConfig({ ...TEST_ENV, TELEGRAM_CHANNEL_ID: bad })).toThrow(/TELEGRAM_CHANNEL_ID/);
+    }
+  });
+
+  it('never echoes the rejected TELEGRAM_CHANNEL_ID value in the error', () => {
+    try {
+      loadConfig({ ...TEST_ENV, TELEGRAM_CHANNEL_ID: '987654321' });
+    } catch (err) {
+      expect((err as Error).message).not.toContain('987654321');
+    }
+  });
 });
 
 describe('retries with exponential backoff and jitter', () => {

@@ -211,3 +211,23 @@ describe('isTruthy', () => {
     expect(isTruthy(value)).toBe(expected);
   });
 });
+
+describe('http_url filter', () => {
+  it.each([
+    ['https://blogger.googleusercontent.com/img/b/x.jpg', 'https://blogger.googleusercontent.com/img/b/x.jpg'],
+    ['  http://example.com/a.png  ', 'http://example.com/a.png'],
+    ['//blogger.googleusercontent.com/img/x.jpg', 'https://blogger.googleusercontent.com/img/x.jpg'],
+    ['', undefined],
+    ['   ', undefined],
+    ['not-a-url', undefined],
+    ['/relative/path.jpg', undefined],
+    ['ftp://example.com/a.jpg', undefined],
+    ['javascript:alert(1)', undefined],
+    ['http://localhost/a.jpg', undefined],
+    [null, undefined],
+    [42, undefined],
+  ])('http_url(%j) -> %j', (image, expected) => {
+    expect(renderTemplate('{{trigger.body.image | http_url}}', { trigger: { body: { image } } })).toBe(expected);
+  });
+});
+

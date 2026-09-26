@@ -13,17 +13,30 @@
   "workflows": [
     {
       "name": "Blog post to Telegram photo",
-      "description": "Posts the cover image and title of every published blog post to Telegram.",
+      "description": "Posts every published Blogger post to the Telegram channel set in TELEGRAM_CHANNEL_ID: a photo with caption when the post has a usable image, otherwise a text message.",
       "trigger": { "type": "webhook", "event": "post.published" },
       "steps": [
         {
           "key": "announce",
           "type": "telegram.sendPhoto",
           "credential": "telegram-bot",
+          "runIf": "{{trigger.body.image | http_url}}",
           "config": {
-            "chatId": "{{trigger.body.telegram_chat_id}}",
-            "photo": "{{trigger.body.image}}",
-            "caption": "{{trigger.body.title}}"
+            "photo": "{{trigger.body.image | http_url}}",
+            "parseMode": "HTML",
+            "fallbackToMessage": true,
+            "caption": "<b>{{trigger.body.title | default:\"New post\" | truncate:200 | escape_html}}</b>\n\n{{trigger.body.excerpt | strip_html | truncate:600 | escape_html}}\n\n{{trigger.body.url | escape_html}}"
+          }
+        },
+        {
+          "key": "announce_text",
+          "type": "telegram.sendMessage",
+          "credential": "telegram-bot",
+          "runIf": "{{trigger.body.image | http_url | not}}",
+          "config": {
+            "parseMode": "HTML",
+            "disableWebPagePreview": false,
+            "text": "<b>{{trigger.body.title | default:\"New post\" | truncate:200 | escape_html}}</b>\n\n{{trigger.body.excerpt | strip_html | truncate:3000 | escape_html}}\n\n{{trigger.body.url | escape_html}}"
           }
         }
       ]

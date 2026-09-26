@@ -1,0 +1,9 @@
+{
+  "id": "test-post-without-image",
+  "type": "post.published",
+  "title": "Automation engine test: post WITHOUT image",
+  "excerpt": "This test post has no image, so it should arrive in the channel as a text message.",
+  "url": "https://yakobsendeku.blogspot.com/",
+  "image": "",
+  "author": { "name": "Nolawi" }
+}

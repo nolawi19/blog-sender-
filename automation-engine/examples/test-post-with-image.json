@@ -1,0 +1,9 @@
+{
+  "id": "test-post-with-image",
+  "type": "post.published",
+  "title": "Automation engine test: post WITH image",
+  "excerpt": "This test post has a cover image, so it should arrive in the channel as a photo with this caption.",
+  "url": "https://yakobsendeku.blogspot.com/",
+  "image": "https://upload.wikimedia.org/wikipedia/commons/a/a9/Example.jpg",
+  "author": { "name": "Nolawi" }
+}

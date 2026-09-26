@@ -339,11 +339,16 @@ export class TelegramClient {
 // ---------------------------------------------------------------------------
 
 const chatIdSchema = z.union([z.number().int(), z.string().trim().min(1).max(64)]);
+/** Empty or missing chatId means "use the configured default channel" (TELEGRAM_CHANNEL_ID). */
+const optionalChatIdSchema = z.preprocess(
+  (value) => (value === null || (typeof value === 'string' && value.trim() === '') ? undefined : value),
+  chatIdSchema.optional(),
+);
 const parseModeSchema = z.enum(['HTML', 'MarkdownV2', 'Markdown']);
 const replyMarkupSchema = z.record(z.string(), z.unknown());
 
 export const sendMessageConfigSchema = z.object({
-  chatId: chatIdSchema,
+  chatId: optionalChatIdSchema,
   text: z.string().min(1, 'text must not be empty').max(16_384),
   parseMode: parseModeSchema.optional(),
   disableNotification: z.boolean().optional(),
@@ -353,17 +358,43 @@ export const sendMessageConfigSchema = z.object({
   replyMarkup: replyMarkupSchema.optional(),
 });
 
-export const sendPhotoConfigSchema = z.object({
-  chatId: chatIdSchema,
-  photo: z.string().trim().min(1, 'photo must not be empty').max(2_048),
-  caption: z.string().max(8_192).optional(),
-  parseMode: parseModeSchema.optional(),
-  disableNotification: z.boolean().optional(),
-  protectContent: z.boolean().optional(),
-  messageThreadId: z.number().int().optional(),
-  hasSpoiler: z.boolean().optional(),
-  replyMarkup: replyMarkupSchema.optional(),
-});
+export const sendPhotoConfigSchema = z
+  .object({
+    chatId: optionalChatIdSchema,
+    photo: z.string().trim().max(2_048).optional(),
+    caption: z.string().max(8_192).optional(),
+    parseMode: parseModeSchema.optional(),
+    disableNotification: z.boolean().optional(),
+    protectContent: z.boolean().optional(),
+    messageThreadId: z.number().int().optional(),
+    hasSpoiler: z.boolean().optional(),
+    replyMarkup: replyMarkupSchema.optional(),
+    /**
+     * When true, a missing photo or a photo Telegram cannot use (unreachable URL,
+     * not an image, caption too long) is delivered as a text message with the
+     * caption instead of failing the step.
+     */
+    fallbackToMessage: z.boolean().optional(),
+  })
+  .superRefine((config, ctx) => {
+    if (!config.fallbackToMessage && !config.photo) {
+      ctx.addIssue({ code: 'custom', path: ['photo'], message: 'photo must not be empty' });
+    }
+    if (config.fallbackToMessage && !config.caption?.trim()) {
+      ctx.addIssue({ code: 'custom', path: ['caption'], message: 'caption is required when fallbackToMessage is true' });
+    }
+  });
+
+// Telegram 400 errors meaning "this photo cannot be used"; everything else (chat
+// not found, bad token, HTML parse errors) must still fail the step.
+const PHOTO_UNUSABLE =
+  /failed to get HTTP URL content|wrong type of the web page content|wrong file identifier|wrong remote file|WEBPAGE_CURL_FAILED|WEBPAGE_MEDIA_EMPTY|PHOTO_INVALID|IMAGE_PROCESS_FAILED|PHOTO_SAVE_FILE_INVALID|there is no photo in the request|caption is too long/i;
+
+export function isPhotoUnusableError(err: unknown): boolean {
+  if (!(err instanceof ExternalApiError) || err.httpStatus !== 400) return false;
+  const description = err.details?.['description'];
+  return typeof description === 'string' && PHOTO_UNUSABLE.test(description);
+}
 
 function botTokenFor(context: ActionContext, fallback: string | undefined): string {
   const fromCredential = context.credential?.data['botToken'];
@@ -374,11 +405,26 @@ function botTokenFor(context: ActionContext, fallback: string | undefined): stri
   });
 }
 
+function chatIdFor(configured: string | number | undefined, fallback: string | undefined): string | number {
+  if (configured !== undefined) return configured;
+  if (fallback) return fallback;
+  throw new ConfigurationError('No Telegram destination: set TELEGRAM_CHANNEL_ID or give the step a chatId', {
+    code: 'TELEGRAM_CHAT_MISSING',
+  });
+}
+
 function messageOutput(message: TelegramMessage): Record<string, unknown> {
   return { messageId: message.message_id, chatId: message.chat.id, date: message.date };
 }
 
-export function createTelegramDriver(client: TelegramClient, options: { defaultBotToken?: string | undefined } = {}): IntegrationDriver {
+export interface TelegramDriverOptions {
+  /** TELEGRAM_BOT_TOKEN: used when the step has no telegram credential. */
+  defaultBotToken?: string | undefined;
+  /** TELEGRAM_CHANNEL_ID: used when the step has no (or an empty) chatId. */
+  defaultChatId?: string | undefined;
+}
+
+export function createTelegramDriver(client: TelegramClient, options: TelegramDriverOptions = {}): IntegrationDriver {
   const callOptions = (context: ActionContext): TelegramCallOptions => ({
     signal: context.signal,
     onRequestStart: context.markRequestStart,
@@ -393,7 +439,8 @@ export function createTelegramDriver(client: TelegramClient, options: { defaultB
         configSchema: sendMessageConfigSchema,
         credentialProvider: 'telegram',
         async execute(config, context) {
-          const message = await client.sendMessage(botTokenFor(context, options.defaultBotToken), config, callOptions(context));
+          const chatId = chatIdFor(config.chatId, options.defaultChatId);
+          const message = await client.sendMessage(botTokenFor(context, options.defaultBotToken), { ...config, chatId }, callOptions(context));
           return { output: messageOutput(message) };
         },
       }),
@@ -402,8 +449,51 @@ export function createTelegramDriver(client: TelegramClient, options: { defaultB
         configSchema: sendPhotoConfigSchema,
         credentialProvider: 'telegram',
         async execute(config, context) {
-          const message = await client.sendPhoto(botTokenFor(context, options.defaultBotToken), config, callOptions(context));
-          return { output: messageOutput(message) };
+          const token = botTokenFor(context, options.defaultBotToken);
+          const chatId = chatIdFor(config.chatId, options.defaultChatId);
+          const sendAsText = async (reason: string): Promise<{ output: unknown }> => {
+            context.logger.warn({ reason }, 'photo unusable; sending the caption as a text message instead');
+            const message = await client.sendMessage(
+              token,
+              {
+                chatId,
+                text: config.caption ?? '',
+                parseMode: config.parseMode,
+                disableNotification: config.disableNotification,
+                protectContent: config.protectContent,
+                messageThreadId: config.messageThreadId,
+                replyMarkup: config.replyMarkup,
+              },
+              callOptions(context),
+            );
+            return { output: { ...messageOutput(message), fallback: 'sendMessage', fallbackReason: reason } };
+          };
+
+          // Never call sendPhoto without a photo (schema guarantees fallbackToMessage here).
+          if (!config.photo) return sendAsText('missing_photo');
+          try {
+            const message = await client.sendPhoto(
+              token,
+              {
+                chatId,
+                photo: config.photo,
+                caption: config.caption,
+                parseMode: config.parseMode,
+                disableNotification: config.disableNotification,
+                protectContent: config.protectContent,
+                messageThreadId: config.messageThreadId,
+                hasSpoiler: config.hasSpoiler,
+                replyMarkup: config.replyMarkup,
+              },
+              callOptions(context),
+            );
+            return { output: messageOutput(message) };
+          } catch (err) {
+            if (config.fallbackToMessage && isPhotoUnusableError(err)) {
+              return sendAsText(String((err as ExternalApiError).details?.['description'] ?? 'photo rejected'));
+            }
+            throw err;
+          }
         },
       }),
     ],

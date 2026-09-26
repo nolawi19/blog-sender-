@@ -149,6 +149,23 @@ export function truncate(text: string, max: number, suffix = '…'): string {
 
 const isEmpty = (v: unknown): boolean => v === undefined || v === null || v === '';
 
+/**
+ * Returns the value as an absolute http(s) URL, or undefined when it is empty or
+ * not a usable URL. Protocol-relative URLs (//host/path) are upgraded to https.
+ */
+export function toHttpUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  let candidate = value.trim();
+  if (candidate === '') return undefined;
+  if (candidate.startsWith('//')) candidate = `https:${candidate}`;
+  try {
+    const url = new URL(candidate);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.hostname.includes('.') ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const filters = new Map<string, FilterSpec>([
   ['default', { minArgs: 1, maxArgs: 1, fn: (v, [d]) => (isEmpty(v) ? d : v) }],
   ['escape_html', { minArgs: 0, maxArgs: 0, fn: (v) => escapeHtml(toText(v)) }],
@@ -192,6 +209,7 @@ const filters = new Map<string, FilterSpec>([
     },
   ],
   ['not', { minArgs: 0, maxArgs: 0, fn: (v) => !isTruthy(v) }],
+  ['http_url', { minArgs: 0, maxArgs: 0, fn: (v) => toHttpUrl(v) }],
 ]);
 
 export function registerFilter(name: string, spec: FilterSpec): void {

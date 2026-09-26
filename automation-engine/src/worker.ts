@@ -53,6 +53,9 @@ async function main(): Promise<void> {
 
   const metrics = new Metrics({ service: 'worker', queue: automationQueue });
 
+  if (!config.TELEGRAM_CHANNEL_ID) {
+    logger.warn('TELEGRAM_CHANNEL_ID is not set: Telegram steps without an explicit chatId will fail with TELEGRAM_CHAT_MISSING');
+  }
   const registry = createDefaultRegistry(config, logger);
   await registry.initAll(); // warms Telegram keep-alive connections before taking jobs
   shutdown.register('integrations', () => registry.closeAll());

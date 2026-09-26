@@ -9,6 +9,11 @@
  *   MOCK_ERROR_RATE       0..1 probability of a 500 response
  *   MOCK_RATE_LIMIT_RATE  0..1 probability of a 429 with retry_after=1
  *   MOCK_FAIL_FIRST       respond 500 to the first N requests (retry testing)
+ *
+ * Like the real API, sendPhoto is rejected with 400 when the photo is not a URL
+ * ("wrong file identifier/HTTP URL specified") or its host cannot be reached
+ * (hosts under the reserved .invalid TLD: "failed to get HTTP URL content").
+ * GET /requests returns the last 50 calls (method, chat_id, photo, text) without tokens.
  */
 import { createServer, type IncomingMessage } from 'node:http';
 
@@ -21,6 +26,7 @@ let failFirst = Number(process.env['MOCK_FAIL_FIRST'] ?? 0);
 const TOKEN = /^\d{5,16}:[A-Za-z0-9_-]{30,64}$/;
 const stats = { requests: 0, ok: 0, errors: 0, rateLimited: 0, byMethod: {} as Record<string, number>, connections: 0 };
 let messageId = 1;
+const recent: Array<{ at: string; method: string; chat_id: unknown; photo?: unknown; text?: string }> = [];
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -44,6 +50,7 @@ const server = createServer(async (req, res) => {
     return;
   }
   if (req.url === '/stats') return send(200, stats);
+  if (req.url === '/requests') return send(200, recent);
   if (req.url === '/stats/reset' && req.method === 'POST') {
     Object.assign(stats, { requests: 0, ok: 0, errors: 0, rateLimited: 0, byMethod: {} });
     return send(200, stats);
@@ -78,8 +85,20 @@ const server = createServer(async (req, res) => {
   } catch {
     return send(400, { ok: false, error_code: 400, description: 'Bad Request: invalid JSON' });
   }
+  const text = String(body['text'] ?? body['caption'] ?? '');
+  recent.push({ at: new Date().toISOString(), method, chat_id: body['chat_id'], ...(method === 'sendPhoto' ? { photo: body['photo'] } : {}), text: text.slice(0, 200) });
+  if (recent.length > 50) recent.shift();
   if (body['chat_id'] === undefined || body['chat_id'] === '') return send(400, { ok: false, error_code: 400, description: 'Bad Request: chat_id is empty' });
   if (method === 'sendPhoto' && !body['photo']) return send(400, { ok: false, error_code: 400, description: 'Bad Request: there is no photo in the request' });
+  if (method === 'sendPhoto') {
+    let host = '';
+    try {
+      host = new URL(String(body['photo'])).hostname;
+    } catch {
+      return send(400, { ok: false, error_code: 400, description: 'Bad Request: wrong file identifier/HTTP URL specified' });
+    }
+    if (host.endsWith('.invalid')) return send(400, { ok: false, error_code: 400, description: 'Bad Request: failed to get HTTP URL content' });
+  }
   if (method === 'sendMessage' && !body['text']) return send(400, { ok: false, error_code: 400, description: 'Bad Request: message text is empty' });
 
   stats.ok++;

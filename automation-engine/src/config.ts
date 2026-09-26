@@ -32,6 +32,18 @@ const envSchema = z.object({
   ENCRYPTION_KEY: z.string().min(1, 'ENCRYPTION_KEY is required'),
   ENCRYPTION_KEY_ID: z.string().regex(/^[a-z0-9]{1,16}$/).default('v1'),
   TELEGRAM_BOT_TOKEN: z.string().optional().transform((v) => (v && v.length > 0 ? v : undefined)),
+  /**
+   * Default destination for Telegram steps without a chatId: a channel username
+   * (@yourchannel) or a numeric channel ID (-100…). Personal chat IDs are rejected.
+   */
+  TELEGRAM_CHANNEL_ID: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v ? v : undefined))
+    .refine((v) => v === undefined || /^@[A-Za-z][A-Za-z0-9_]{4,31}$/.test(v) || /^-100\d{5,15}$/.test(v), {
+      message: 'must be a channel username like @yourchannel or a channel ID starting with -100',
+    }),
   TELEGRAM_API_BASE_URL: z.url().default('https://api.telegram.org'),
   TELEGRAM_POOL_CONNECTIONS: int(1, 1024).default(32),
   TELEGRAM_WARMUP_CONNECTIONS: int(0, 1024).default(4),
