@@ -286,7 +286,7 @@ describe('Telegram channel destination and photo fallback', () => {
     const err = await noChannel.actions[0]!.run({ text: 'x' }, ctx()).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ConfigurationError);
     expect((err as ConfigurationError).code).toBe('TELEGRAM_CHAT_MISSING');
-    expect((err as Error).message).toContain('TELEGRAM_CHANNEL_ID');
+    expect((err as Error).message).toMatch(/^TELEGRAM_CHANNEL_ID is required/);
     expect(server.requests).toHaveLength(0);
   });
 

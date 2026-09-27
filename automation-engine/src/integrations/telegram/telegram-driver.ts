@@ -424,9 +424,10 @@ function botTokenFor(context: ActionContext, fallback: string | undefined): stri
 function chatIdFor(configured: string | number | undefined, fallback: string | undefined): string | number {
   if (configured !== undefined) return configured;
   if (fallback) return fallback;
-  throw new ConfigurationError('No Telegram destination: set TELEGRAM_CHANNEL_ID or give the step a chatId', {
-    code: 'TELEGRAM_CHAT_MISSING',
-  });
+  throw new ConfigurationError(
+    'TELEGRAM_CHANNEL_ID is required: set it in .env to the channel the bot posts to (@channelusername or the -100... channel ID) and recreate the worker',
+    { code: 'TELEGRAM_CHAT_MISSING' },
+  );
 }
 
 function messageOutput(message: TelegramMessage): Record<string, unknown> {

@@ -8,12 +8,14 @@
  */
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { ConfigurationError } from '../src/errors.js';
+import { createDefaultRegistry } from '../src/integrations/index.js';
 import { DriverRegistry } from '../src/integrations/integration-driver.js';
 import { createTelegramDriver, TelegramClient } from '../src/integrations/telegram/telegram-driver.js';
 import { compileTemplate, compileValue } from '../src/mapper/template-mapper.js';
 import { workflowDefinitionSchema, type RuntimeWorkflow } from '../src/types/workflow.js';
-import { WorkflowEngine } from '../src/workflows/workflow-engine.js';
-import { BOT_TOKEN, makeEvent, silentLogger } from './helpers/fixtures.js';
+import { StepFailedError, WorkflowEngine } from '../src/workflows/workflow-engine.js';
+import { BEARER_TOKEN, BOT_TOKEN, buildTestGateway, makeEvent, silentLogger, testConfig } from './helpers/fixtures.js';
 import { json, startTestServer, telegramOk, type TestServer } from './helpers/http-server.js';
 
 const CHANNEL = '@automation_test_channel';
@@ -117,9 +119,9 @@ const post = (overrides: Record<string, unknown>) => ({
   ...overrides,
 });
 
-async function run(body: Record<string, unknown>) {
-  const outcome = await engine.execute({
-    workflow,
+async function run(body: Record<string, unknown>, options: { engine?: WorkflowEngine; workflow?: RuntimeWorkflow } = {}) {
+  const outcome = await (options.engine ?? engine).execute({
+    workflow: options.workflow ?? workflow,
     event: makeEvent(body),
     executionId: 'exec-1',
     attempt: 1,
@@ -263,3 +265,96 @@ describe('Blogger -> Telegram channel workflow (examples/blog-to-telegram.workfl
   });
 });
 
+
+describe('Telegram destination comes from TELEGRAM_CHANNEL_ID (never from the Blogger payload)', () => {
+  const ENV_CHANNEL = '-1009876543210';
+  const engineFor = (env: NodeJS.ProcessEnv) => {
+    // The same wiring as the worker: .env -> loadConfig -> createDefaultRegistry -> TelegramDriver.
+    const config = testConfig({
+      TELEGRAM_BOT_TOKEN: BOT_TOKEN,
+      TELEGRAM_API_BASE_URL: telegram.url,
+      TELEGRAM_WARMUP_CONNECTIONS: '0',
+      TELEGRAM_KEEP_WARM_INTERVAL_MS: '0',
+      TELEGRAM_INLINE_RETRIES: '0',
+      ...env,
+    });
+    const registry = createDefaultRegistry(config, silentLogger());
+    return { registry, engine: new WorkflowEngine({ registry, logger: silentLogger(), defaultStepTimeoutMs: 2_000 }) };
+  };
+
+  it('sendPhoto (post with image) and sendMessage (post without image) both use TELEGRAM_CHANNEL_ID from the environment', async () => {
+    const { registry, engine: envEngine } = engineFor({ TELEGRAM_CHANNEL_ID: ENV_CHANNEL });
+    try {
+      const withImage = await run(post({ id: 'env-1' }), { engine: envEngine });
+      expect(withImage.calls.map((c) => [c.method, c.body['chat_id']])).toEqual([['sendPhoto', ENV_CHANNEL]]);
+      telegram.requests.length = 0;
+      const withoutImage = await run(post({ id: 'env-2', image: '' }), { engine: envEngine });
+      expect(withoutImage.calls.map((c) => [c.method, c.body['chat_id']])).toEqual([['sendMessage', ENV_CHANNEL]]);
+    } finally {
+      await registry.closeAll();
+    }
+  });
+
+  it('does not need telegram_chat_id: a legacy chatId template that renders empty falls back to TELEGRAM_CHANNEL_ID', async () => {
+    // The old workflow used "chatId": "{{trigger.body.telegram_chat_id}}", which Blogger never sends.
+    const legacy: RuntimeWorkflow = {
+      ...workflow,
+      steps: workflow.steps.map((step, i) => ({
+        ...step,
+        config: compileValue({ ...(definition.steps[i]!.config as Record<string, unknown>), chatId: '{{trigger.body.telegram_chat_id}}' }),
+      })),
+    };
+    for (const payload of [post({}), post({ image: '' }), post({ telegram_chat_id: '' }), post({ telegram_chat_id: null, image: '' })]) {
+      const { outcome, calls } = await run(payload, { workflow: legacy });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.body['chat_id']).toBe(CHANNEL);
+      expect(outcome.steps.every((s) => s.status !== 'failed')).toBe(true);
+      telegram.requests.length = 0;
+    }
+  });
+
+  it.each([
+    ['unset', {}],
+    ['empty', { TELEGRAM_CHANNEL_ID: '' }],
+  ])('TELEGRAM_CHANNEL_ID %s -> clear, non-retryable configuration error and no Telegram call', async (_label, env) => {
+    const { registry, engine: noChannelEngine } = engineFor(env);
+    try {
+      for (const payload of [post({}), post({ image: '' })]) {
+        const err = await run(payload, { engine: noChannelEngine }).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(StepFailedError);
+        const cause = (err as StepFailedError).error;
+        expect(cause).toBeInstanceOf(ConfigurationError);
+        expect(cause).toMatchObject({ code: 'TELEGRAM_CHAT_MISSING', retryable: false });
+        expect(cause.message).toMatch(/^TELEGRAM_CHANNEL_ID is required/);
+        expect(telegram.requests).toHaveLength(0);
+      }
+    } finally {
+      await registry.closeAll();
+    }
+  });
+});
+
+describe('duplicate Blogger events (/webhooks/blog, Bearer auth, idempotencyField "id")', () => {
+  it('the same post sent again (5-minute polling, sendExistingPosts, retries) is accepted once and enqueued once', async () => {
+    const gw = await buildTestGateway({ endpoint: { idempotencyPath: [file.endpoint.idempotencyField] } });
+    try {
+      const headers = { authorization: `Bearer ${BEARER_TOKEN}`, 'content-type': 'application/json' };
+      const blogPost = post({ id: 'tag:blogger.com,1999:blog-1.post-42' });
+      const first = await gw.app.inject({ method: 'POST', url: '/webhooks/blog', headers, payload: blogPost });
+      const again = await gw.app.inject({ method: 'POST', url: '/webhooks/blog', headers, payload: blogPost });
+      const edited = await gw.app.inject({ method: 'POST', url: '/webhooks/blog', headers, payload: { ...blogPost, title: 'Edited title' } });
+      const other = await gw.app.inject({ method: 'POST', url: '/webhooks/blog', headers, payload: post({ id: 'tag:blogger.com,1999:blog-1.post-43' }) });
+      expect([first.statusCode, again.statusCode, edited.statusCode, other.statusCode]).toEqual([202, 200, 200, 202]);
+      expect(again.json()).toMatchObject({ duplicate: true, eventId: first.json().eventId });
+      expect(gw.publisher.jobs).toHaveLength(2);
+      expect(gw.publisher.jobs.map((j) => j.idempotencyKey)).toEqual([
+        'f:tag:blogger.com,1999:blog-1.post-42',
+        'f:tag:blogger.com,1999:blog-1.post-43',
+      ]);
+      const unauthorized = await gw.app.inject({ method: 'POST', url: '/webhooks/blog', headers: { 'content-type': 'application/json' }, payload: blogPost });
+      expect(unauthorized.statusCode).toBe(401);
+    } finally {
+      await gw.app.close();
+    }
+  });
+});
