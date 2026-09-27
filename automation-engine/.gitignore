@@ -7,3 +7,4 @@ coverage/
 *.log
 bench/results/
 .DS_Store
+dump.rdb
