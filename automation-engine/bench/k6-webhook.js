@@ -1,11 +1,11 @@
 // k6 load test for the webhook gateway (constant arrival rate, stepped).
 //
 //   docker compose --profile bench run --rm k6            (inside the compose network)
-//   k6 run -e WEBHOOK_URL=http://localhost:3000/webhooks/blog -e WEBHOOK_TOKEN=... bench/k6-webhook.js
+//   k6 run -e WEBHOOK_URL=http://localhost:3001/webhooks/blog -e WEBHOOK_TOKEN=... bench/k6-webhook.js
 //
 // Env: WEBHOOK_URL, WEBHOOK_TOKEN, RATES (default "100,500,1000,5000"), STAGE_SECONDS (default 20)
 // k6 reports client-side p50/p95/p99/p99.9; pipeline latency comes from GET /metrics/latency
-// on the gateway (:3000) and worker (:9464).
+// on the gateway (:3001 on the host, :3000 inside the compose network) and worker (:9464).
 import http from 'k6/http';
 import { check } from 'k6';
 import exec from 'k6/execution';

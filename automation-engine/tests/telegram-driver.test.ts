@@ -226,9 +226,12 @@ describe('Telegram driver and secret handling', () => {
   it('rejects invalid rendered configuration as a non-retryable configuration error', async () => {
     const driver = createTelegramDriver(makeClient());
     const sendPhoto = driver.actions.find((a) => a.type === 'telegram.sendPhoto')!;
-    const err = await sendPhoto.run({ chatId: '42', caption: 'no photo' }, actionContext()).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(ConfigurationError);
-    expect((err as ConfigurationError).code).toBe('STEP_CONFIG_INVALID');
+    for (const config of [{ chatId: '42' }, { chatId: '42', caption: 'no photo', fallbackToMessage: false }, { chatId: { bad: true }, photo: 'https://example.com/a.jpg' }]) {
+      const err = await sendPhoto.run(config, actionContext()).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConfigurationError);
+      expect((err as ConfigurationError).code).toBe('STEP_CONFIG_INVALID');
+      expect((err as ConfigurationError).retryable).toBe(false);
+    }
     expect(server.requests).toHaveLength(0);
   });
 
@@ -309,6 +312,23 @@ describe('Telegram channel destination and photo fallback', () => {
     },
   );
 
+  it('a retry after a rate-limited fallback sends the text directly instead of the rejected photo again', async () => {
+    let messageAttempts = 0;
+    server.setHandler((req, res) => {
+      if (req.url.endsWith('/sendPhoto')) return json(res, 400, { ok: false, error_code: 400, description: 'Bad Request: failed to get HTTP URL content' });
+      return ++messageAttempts === 1
+        ? json(res, 429, { ok: false, error_code: 429, description: 'Too Many Requests: retry after 1', parameters: { retry_after: 1 } })
+        : telegramOk(res, -1001234567890);
+    });
+    const sendPhoto = driver().actions.find((a) => a.type === 'telegram.sendPhoto')!;
+    const config = { photo: 'https://images.invalid/cover.jpg', caption: 'Title' };
+    const first = await sendPhoto.run(config, ctx()).catch((e: unknown) => e);
+    expect(first).toBeInstanceOf(RateLimitError); // the job is postponed, not failed
+    const second = await sendPhoto.run(config, ctx());
+    expect(server.requests.map((r) => r.url.split('/').pop())).toEqual(['sendPhoto', 'sendMessage', 'sendMessage']);
+    expect(second.output).toMatchObject({ fallback: 'sendMessage', fallbackReason: 'photo_rejected_on_previous_attempt' });
+  });
+
   it('does not hide unrelated errors behind the fallback (e.g. chat not found)', async () => {
     server.setHandler((_req, res) => json(res, 400, { ok: false, error_code: 400, description: 'Bad Request: chat not found' }));
     const err = await action('telegram.sendPhoto').run({ photo: 'https://example.com/a.jpg', caption: 'Title', fallbackToMessage: true }, ctx()).catch((e: unknown) => e);
@@ -316,13 +336,57 @@ describe('Telegram channel destination and photo fallback', () => {
     expect(server.requests).toHaveLength(1);
   });
 
-  it('without fallbackToMessage the original validation is unchanged', async () => {
-    const err = await action('telegram.sendPhoto').run({ photo: '', caption: 'x' }, ctx()).catch((e: unknown) => e);
-    expect((err as ConfigurationError).code).toBe('STEP_CONFIG_INVALID');
-    expect(JSON.stringify((err as ConfigurationError).details)).toContain('photo must not be empty');
-    const noCaption = await action('telegram.sendPhoto').run({ photo: '', fallbackToMessage: true }, ctx()).catch((e: unknown) => e);
-    expect(JSON.stringify((noCaption as ConfigurationError).details)).toContain('caption is required');
+  it('fallbackToMessage: false keeps the strict validation and never calls Telegram', async () => {
+    const empty = await action('telegram.sendPhoto').run({ photo: '', caption: 'x', fallbackToMessage: false }, ctx()).catch((e: unknown) => e);
+    expect((empty as ConfigurationError).code).toBe('STEP_CONFIG_INVALID');
+    expect(JSON.stringify((empty as ConfigurationError).details)).toContain('photo must not be empty');
+    const noCaption = await action('telegram.sendPhoto').run({ photo: '' }, ctx()).catch((e: unknown) => e);
+    expect(JSON.stringify((noCaption as ConfigurationError).details)).toContain('photo must not be empty');
+    const invalid = await action('telegram.sendPhoto').run({ photo: '/img/cover.jpg', caption: 'x', fallbackToMessage: false }, ctx()).catch((e: unknown) => e);
+    expect((invalid as ConfigurationError).code).toBe('STEP_CONFIG_INVALID');
+    expect(JSON.stringify((invalid as ConfigurationError).details)).toContain('absolute http(s) URL');
     expect(server.requests).toHaveLength(0);
+  });
+
+  it.each([
+    ['missing', undefined, 'missing_photo'],
+    ['empty', '', 'missing_photo'],
+    ['whitespace', '   ', 'missing_photo'],
+    ['relative', '/img/cover.jpg', 'invalid_photo'],
+    ['malformed', 'http://', 'invalid_photo'],
+    ['not a URL', 'not-a-valid-image-url', 'invalid_photo'],
+    ['non-http scheme', 'ftp://example.com/a.jpg', 'invalid_photo'],
+    ['javascript', 'javascript:alert(1)', 'invalid_photo'],
+    ['credentials in URL', 'https://user:pass@example.com/a.jpg', 'invalid_photo'],
+  ])('by default a %s photo is sent as a text message and sendPhoto is never called', async (_label, photo, reason) => {
+    const result = await action('telegram.sendPhoto').run({ ...(photo === undefined ? {} : { photo }), caption: '<b>Title</b>', parseMode: 'HTML' }, ctx());
+    expect(server.requests.map((r) => r.url.split('/').pop())).toEqual(['sendMessage']);
+    expect(server.requests[0]!.json).toMatchObject({ chat_id: CHANNEL, text: '<b>Title</b>', parse_mode: 'HTML' });
+    expect(result.output).toMatchObject({ fallback: 'sendMessage', fallbackReason: reason });
+  });
+
+  it('sends usable photos: https, http, protocol-relative (upgraded) and Telegram file_ids', async () => {
+    const fileId = 'AgACAgIAAxkBAAIBY2ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm';
+    for (const [photo, sent] of [
+      ['https://blogger.googleusercontent.com/img/b/cover.jpg', 'https://blogger.googleusercontent.com/img/b/cover.jpg'],
+      ['http://example.com/a.jpg', 'http://example.com/a.jpg'],
+      ['//blogger.googleusercontent.com/img/b/cover.jpg', 'https://blogger.googleusercontent.com/img/b/cover.jpg'],
+      ['https://example.com/my cover.jpg', 'https://example.com/my%20cover.jpg'],
+      [fileId, fileId],
+    ]) {
+      server.requests.length = 0;
+      await action('telegram.sendPhoto').run({ photo, caption: 'c' }, ctx());
+      expect(server.requests.map((r) => [r.url.split('/').pop(), r.json?.['photo']])).toEqual([['sendPhoto', sent]]);
+    }
+  });
+
+  it('an old-style step (chatId from the payload, raw image, no fallbackToMessage) still delivers to the channel', async () => {
+    // The v1 Blogger workflow: {"chatId": "{{trigger.body.telegram_chat_id}}", "photo": "{{trigger.body.image}}", "caption": "{{trigger.body.title}}"}
+    // rendered for a post without telegram_chat_id and without an image.
+    const result = await action('telegram.sendPhoto').run({ caption: 'Post title' }, ctx());
+    expect(server.requests.map((r) => r.url.split('/').pop())).toEqual(['sendMessage']);
+    expect(server.requests[0]!.json).toMatchObject({ chat_id: CHANNEL, text: 'Post title' });
+    expect(result.output).toMatchObject({ fallback: 'sendMessage', fallbackReason: 'missing_photo' });
   });
 });
 

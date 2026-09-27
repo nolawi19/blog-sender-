@@ -26,7 +26,7 @@ function testRegistry(calls: Call[], behaviour: { failWith?: Error; delayMs?: nu
             const timer = setTimeout(resolve, behaviour.delayMs);
             context.signal.addEventListener('abort', () => {
               clearTimeout(timer);
-              reject(context.signal.reason);
+              reject(context.signal.reason as Error);
             });
           });
         }
@@ -114,6 +114,27 @@ describe('WorkflowEngine', () => {
       },
     });
     expect(persisted).toEqual(['a', 'b']);
+  });
+
+  it('a failure to save resume state never turns a sent step into a failed one (no retry, no duplicate send)', async () => {
+    const calls: Call[] = [];
+    const workflow = makeWorkflow(makeEndpoint(), [makeStep({ key: 'announce' }), makeStep({ key: 'announce_text', position: 1, runIf: '{{steps.announce.skipped}}' })]);
+    const outcome = await engineWith(testRegistry(calls)).execute({
+      workflow,
+      event: makeEvent(),
+      executionId: 'e',
+      attempt: 1,
+      receivedAt: Date.now(),
+      signal: AbortSignal.timeout(5_000),
+      onStepCompleted: async () => {
+        throw new Error('redis connection lost');
+      },
+    });
+    expect(calls).toHaveLength(1);
+    expect(outcome.steps.map((s) => [s.stepKey, s.status])).toEqual([
+      ['announce', 'succeeded'],
+      ['announce_text', 'skipped'],
+    ]);
   });
 
   it('wraps driver failures with the failing step and the classified error', async () => {

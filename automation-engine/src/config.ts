@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TELEGRAM_BOT_TOKEN_PATTERN } from './security/credentials.js';
 
 const boolFromEnv = z
   .enum(['true', 'false', '1', '0', 'yes', 'no'])
@@ -28,10 +29,22 @@ const envSchema = z.object({
   DATABASE_POOL_SIZE: int(1, 200).default(10),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
   WORKER_CONCURRENCY: int(1, 10_000).default(50),
-  WEBHOOK_SECRET: z.string().min(16, 'WEBHOOK_SECRET must be at least 16 characters'),
-  ENCRYPTION_KEY: z.string().min(1, 'ENCRYPTION_KEY is required'),
+  WEBHOOK_SECRET: z
+    .string({ error: 'WEBHOOK_SECRET is required (generate one with: openssl rand -hex 32)' })
+    .min(16, 'WEBHOOK_SECRET must be at least 16 characters (generate one with: openssl rand -hex 32)')
+    .refine((v) => !/change-?me/i.test(v), 'WEBHOOK_SECRET is still the .env.example placeholder (generate one with: openssl rand -hex 32)'),
+  ENCRYPTION_KEY: z
+    .string({ error: 'ENCRYPTION_KEY is required (generate one with: openssl rand -hex 32)' })
+    .min(1, 'ENCRYPTION_KEY is required (generate one with: openssl rand -hex 32)'),
   ENCRYPTION_KEY_ID: z.string().regex(/^[a-z0-9]{1,16}$/).default('v1'),
-  TELEGRAM_BOT_TOKEN: z.string().optional().transform((v) => (v && v.length > 0 ? v : undefined)),
+  TELEGRAM_BOT_TOKEN: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v ? v : undefined))
+    .refine((v) => v === undefined || TELEGRAM_BOT_TOKEN_PATTERN.test(v), {
+      message: 'does not look like a bot token from @BotFather (expected <bot id>:<secret>)',
+    }),
   /**
    * Default destination for Telegram steps without a chatId: a channel username
    * (@yourchannel) or a numeric channel ID (-100…). Personal chat IDs are rejected.
@@ -45,6 +58,13 @@ const envSchema = z.object({
       message: 'must be a channel username like @yourchannel or a channel ID starting with -100',
     }),
   TELEGRAM_API_BASE_URL: z.url().default('https://api.telegram.org'),
+  /** Public base URL of the gateway (e.g. http://localhost:3001 or the tunnel URL); used in printed instructions. */
+  PUBLIC_BASE_URL: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v ? v.replace(/\/+$/, '') : undefined))
+    .pipe(z.url().optional()),
   TELEGRAM_POOL_CONNECTIONS: int(1, 1024).default(32),
   TELEGRAM_WARMUP_CONNECTIONS: int(0, 1024).default(4),
   TELEGRAM_KEEP_WARM_INTERVAL_MS: int(0).default(25_000),

@@ -17,6 +17,7 @@ x-app: &app
     DATABASE_URL: postgresql://${POSTGRES_USER:-automation}:${POSTGRES_PASSWORD:-automation}@postgres:5432/${POSTGRES_DB:-automation}?schema=public
     REDIS_URL: redis://redis:6379
     HOST: 0.0.0.0
+    PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3001}
   restart: unless-stopped
   stop_grace_period: 30s
   networks: [backend]

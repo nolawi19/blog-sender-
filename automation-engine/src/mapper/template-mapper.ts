@@ -173,8 +173,10 @@ export function truncate(text: string, max: number, suffix = '…'): string {
 const isEmpty = (v: unknown): boolean => v === undefined || v === null || v === '';
 
 /**
- * Returns the value as an absolute http(s) URL, or undefined when it is empty or
- * not a usable URL. Protocol-relative URLs (//host/path) are upgraded to https.
+ * Returns the value as a normalized absolute http(s) URL (spaces and non-ASCII
+ * characters percent-encoded), or undefined when it is empty, relative, malformed,
+ * has no dotted host name or embeds credentials. Protocol-relative URLs
+ * (//host/path) are upgraded to https.
  */
 export function toHttpUrl(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -183,7 +185,8 @@ export function toHttpUrl(value: unknown): string | undefined {
   if (candidate.startsWith('//')) candidate = `https:${candidate}`;
   try {
     const url = new URL(candidate);
-    return (url.protocol === 'http:' || url.protocol === 'https:') && url.hostname.includes('.') ? candidate : undefined;
+    const usable = (url.protocol === 'http:' || url.protocol === 'https:') && url.hostname.includes('.') && !url.username && !url.password;
+    return usable ? url.href : undefined;
   } catch {
     return undefined;
   }
@@ -217,7 +220,7 @@ const filters = new Map<string, FilterSpec>([
     'join',
     { minArgs: 0, maxArgs: 1, fn: (v, [sep]) => (Array.isArray(v) ? v.map(toText).join(typeof sep === 'string' ? sep : ', ') : toText(v)) },
   ],
-  ['first', { minArgs: 0, maxArgs: 0, fn: (v) => (Array.isArray(v) ? v[0] : v) }],
+  ['first', { minArgs: 0, maxArgs: 0, fn: (v) => (Array.isArray(v) ? (v as unknown[])[0] : v) }],
   ['string', { minArgs: 0, maxArgs: 0, fn: (v) => toText(v) }],
   [
     'number',

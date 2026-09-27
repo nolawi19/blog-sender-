@@ -97,10 +97,10 @@ export class DriverRegistry {
   }
 
   async initAll(): Promise<void> {
-    await Promise.all(this.drivers.map((d) => d.init?.()));
+    await Promise.all(this.drivers.map(async (d) => d.init?.()));
   }
 
   async closeAll(): Promise<void> {
-    await Promise.allSettled(this.drivers.map((d) => d.close?.()));
+    await Promise.allSettled(this.drivers.map(async (d) => d.close?.()));
   }
 }

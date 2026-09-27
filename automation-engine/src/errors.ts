@@ -164,7 +164,7 @@ const RETRYABLE_PRISMA_CODES = new Set(['P1001', 'P1002', 'P1008', 'P1017', 'P20
 
 function errorCode(err: unknown): string | undefined {
   if (typeof err === 'object' && err !== null && 'code' in err) {
-    const code = (err as { code: unknown }).code;
+    const code = err.code;
     return typeof code === 'string' ? code : undefined;
   }
   return undefined;

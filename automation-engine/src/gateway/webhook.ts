@@ -79,7 +79,7 @@ export function normalizeQuery(raw: unknown): Record<string, string | string[]> 
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof value === 'string') out[key] = value;
     else if (Array.isArray(value)) out[key] = value.map(String);
-    else if (value !== undefined && value !== null) out[key] = String(value);
+    else if (typeof value === 'number' || typeof value === 'boolean') out[key] = String(value);
   }
   return out;
 }
@@ -242,6 +242,14 @@ export async function registerWebhookRoutes(app: FastifyInstance, deps: WebhookR
         throw new ServiceUnavailableError('Queue is saturated, retry later', 'QUEUE_SATURATED');
       }
 
+      const workflows = registry.workflowsFor(endpoint.id, eventType);
+      if (workflows.length === 0) {
+        // Nothing to run, so the key is not claimed: once a matching workflow is
+        // active, the sender's next delivery of this event executes normally.
+        request.log.warn({ requestId: request.id, eventId, endpoint: endpoint.slug, eventType }, 'webhook accepted but no active workflow matches this event type; nothing will run');
+        return reply.code(202).send({ accepted: true, duplicate: false, eventId, requestId: request.id, eventType, executions: [] });
+      }
+
       const idemKey = idempotencyKeyFor(headers.data, body.data, endpoint, request.rawBody);
       if (idemKey) {
         const claim = await idempotency.claim(endpoint.id, idemKey, eventId, config.IDEMPOTENCY_TTL_SEC);
@@ -252,7 +260,6 @@ export async function registerWebhookRoutes(app: FastifyInstance, deps: WebhookR
         }
       }
 
-      const workflows = registry.workflowsFor(endpoint.id, eventType);
       const enqueuedAt = clock();
       const jobs: AutomationJobData[] = workflows.map((workflow) => ({
         executionId: randomUUID(),

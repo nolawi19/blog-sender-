@@ -203,10 +203,12 @@ export class WorkflowLoader implements EndpointRegistry, WorkflowSource {
             const workflow = this.toRuntimeWorkflow(row);
             if (workflow) addWorkflow(next, workflow);
           }
+          const changed = !this.ready || !sameSnapshot(this.snapshot, next);
           this.snapshot = next;
           this.negative.clear();
           this.ready = true;
-          this.options.logger.info(
+          // Periodic refreshes that change nothing are logged at debug to keep logs quiet.
+          this.options.logger[changed ? 'info' : 'debug'](
             { endpoints: next.endpoints.size, workflows: next.workflows.size, ms: Math.round(performance.now() - started) },
             'workflow snapshot loaded',
           );
@@ -330,6 +332,13 @@ export class WorkflowLoader implements EndpointRegistry, WorkflowSource {
     if (isKnownProvider(cred.provider)) credentialSchemas[cred.provider].parse(data);
     return { id: cred.id, name: cred.name, provider: cred.provider, data };
   }
+}
+
+function sameSnapshot(a: Snapshot, b: Snapshot): boolean {
+  if (a.endpoints.size !== b.endpoints.size || a.workflows.size !== b.workflows.size) return false;
+  for (const [id, workflow] of b.workflows) if (a.workflows.get(id)?.version !== workflow.version) return false;
+  for (const slug of b.endpoints.keys()) if (!a.endpoints.has(slug)) return false;
+  return true;
 }
 
 function cloneSnapshot(s: Snapshot): Snapshot {

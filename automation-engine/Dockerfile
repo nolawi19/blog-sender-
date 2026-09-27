@@ -18,13 +18,13 @@ COPY prisma ./prisma
 RUN npm ci --no-audit --no-fund
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
-RUN npx prisma generate && npm run build
+RUN npx prisma generate --no-hints && npm run build
 
 # ---- prod-deps: runtime dependencies only (+ generated Prisma client) -------
 FROM base AS prod-deps
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
-RUN npm ci --omit=dev --no-audit --no-fund && npx prisma generate && npm cache clean --force
+RUN npm ci --omit=dev --no-audit --no-fund && npx prisma generate --no-hints
 
 # ---- runtime ----------------------------------------------------------------
 FROM base AS runtime

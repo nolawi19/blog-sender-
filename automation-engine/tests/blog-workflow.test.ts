@@ -6,7 +6,7 @@
  * Guards against the production failures:
  *   STEP_CONFIG_INVALID telegram.sendPhoto: "chatId: Invalid input", "photo must not be empty"
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ConfigurationError } from '../src/errors.js';
 import { createDefaultRegistry } from '../src/integrations/index.js';
@@ -70,15 +70,16 @@ beforeAll(async () => {
     if (!body['chat_id']) return json(res, 400, { ok: false, error_code: 400, description: 'Bad Request: chat_id is empty' });
     if (method === 'sendPhoto') {
       if (!body['photo']) return json(res, 400, { ok: false, error_code: 400, description: 'Bad Request: there is no photo in the request' });
-      let host = '';
+      let host: string;
       try {
-        host = new URL(String(body['photo'])).hostname;
+        host = new URL(typeof body['photo'] === 'string' ? body['photo'] : '').hostname;
       } catch {
         return json(res, 400, { ok: false, error_code: 400, description: 'Bad Request: wrong file identifier/HTTP URL specified' });
       }
       if (host.endsWith('.invalid')) return json(res, 400, { ok: false, error_code: 400, description: 'Bad Request: failed to get HTTP URL content' });
     }
-    const text = String((method === 'sendPhoto' ? body['caption'] : body['text']) ?? '');
+    const rawText = method === 'sendPhoto' ? body['caption'] : body['text'];
+    const text = typeof rawText === 'string' ? rawText : '';
     const problem = telegramTextProblem(text, body['parse_mode'] === 'HTML', method === 'sendPhoto' ? 1024 : 4096);
     if (problem) return json(res, 400, { ok: false, error_code: 400, description: problem === 'too_long' ? (method === 'sendPhoto' ? 'Bad Request: message caption is too long' : 'Bad Request: message is too long') : `Bad Request: can't parse entities: ${problem}` });
     if (method === 'sendMessage' && !text.trim()) return json(res, 400, { ok: false, error_code: 400, description: 'Bad Request: message text is empty' });
@@ -301,7 +302,7 @@ describe('Telegram destination comes from TELEGRAM_CHANNEL_ID (never from the Bl
       ...workflow,
       steps: workflow.steps.map((step, i) => ({
         ...step,
-        config: compileValue({ ...(definition.steps[i]!.config as Record<string, unknown>), chatId: '{{trigger.body.telegram_chat_id}}' }),
+        config: compileValue({ ...(definition.steps[i]!.config), chatId: '{{trigger.body.telegram_chat_id}}' }),
       })),
     };
     for (const payload of [post({}), post({ image: '' }), post({ telegram_chat_id: '' }), post({ telegram_chat_id: null, image: '' })]) {
@@ -355,6 +356,31 @@ describe('duplicate Blogger events (/webhooks/blog, Bearer auth, idempotencyFiel
       expect(unauthorized.statusCode).toBe(401);
     } finally {
       await gw.app.close();
+    }
+  });
+});
+
+describe('every shipped example workflow (examples/*.workflow.json)', () => {
+  const dir = new URL('../examples/', import.meta.url);
+  const files = readdirSync(dir).filter((f) => f.endsWith('.workflow.json'));
+  let knownTypes: string[] = [];
+  beforeAll(async () => {
+    const registry = createDefaultRegistry(testConfig({ TELEGRAM_WARMUP_CONNECTIONS: '0' }), silentLogger());
+    knownTypes = registry.listActionTypes();
+    await registry.closeAll();
+  });
+
+  it.each(files)('%s parses, compiles, uses known actions and sends to TELEGRAM_CHANNEL_ID', (name) => {
+    const parsed = JSON.parse(readFileSync(new URL(name, dir), 'utf8')) as { workflows: unknown[] };
+    for (const raw of parsed.workflows) {
+      const wf = workflowDefinitionSchema.parse(raw);
+      for (const step of wf.steps) {
+        expect(knownTypes).toContain(step.type);
+        compileValue(step.config);
+        if (step.runIf) compileTemplate(step.runIf);
+        expect(step.config).not.toHaveProperty('chatId');
+        if (step.type === 'telegram.sendPhoto') expect(String(step.config['photo'])).toContain('| http_url');
+      }
     }
   });
 });

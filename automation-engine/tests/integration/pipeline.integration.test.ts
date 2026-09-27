@@ -2,7 +2,8 @@
  * End-to-end pipeline against a real Redis (BullMQ) and a local fake Telegram API:
  * gateway -> Redis/BullMQ -> worker -> engine -> template mapper -> Telegram driver.
  *
- * Runs only when INTEGRATION_REDIS_URL is set (npm run test:integration).
+ * Runs with `npm run test:integration` (redis://localhost:6379/15) or when
+ * INTEGRATION_REDIS_URL is set; skipped by plain `npm test`.
  * PostgreSQL is replaced by in-memory sinks so the queue semantics are tested
  * in isolation.
  */
@@ -25,7 +26,9 @@ import type { AutomationJobData } from '../../src/types/workflow.js';
 import { BEARER_TOKEN, BOT_TOKEN, InMemoryRegistry, makeEndpoint, makeStep, makeWorkflow, silentLogger, testConfig } from '../helpers/fixtures.js';
 import { json, startTestServer, telegramOk, type TestServer } from '../helpers/http-server.js';
 
-const redisUrl = process.env['INTEGRATION_REDIS_URL'];
+// `npm run test:integration` defaults to database 15 of a local Redis (works in every shell, including Windows).
+const redisUrl =
+  process.env['INTEGRATION_REDIS_URL'] ?? (process.env['npm_lifecycle_event'] === 'test:integration' ? 'redis://localhost:6379/15' : undefined);
 
 describe.skipIf(!redisUrl)('pipeline integration (real Redis + BullMQ)', () => {
   const logger = silentLogger();

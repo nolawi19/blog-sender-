@@ -209,6 +209,25 @@ describe('webhook gateway: idempotency', () => {
     expect(gw.publisher.jobs).toHaveLength(1);
   });
 
+  it('does not mark an event as seen when no workflow runs, so it executes once a workflow is active', async () => {
+    gw = await buildTestGateway();
+    const workflow = gw.workflow;
+    gw.registry.workflows.delete(workflow.id); // e.g. the workflow was paused or not created yet
+    const early = await gw.app.inject({ method: 'POST', url: '/webhooks/blog', headers: auth, payload: post });
+    expect(early.statusCode).toBe(202);
+    expect(early.json()).toMatchObject({ duplicate: false, executions: [] });
+    expect(gw.publisher.jobs).toHaveLength(0);
+
+    gw.registry.addWorkflow(workflow);
+    const later = await gw.app.inject({ method: 'POST', url: '/webhooks/blog', headers: auth, payload: post });
+    expect(later.statusCode).toBe(202);
+    expect(later.json().executions).toHaveLength(1);
+    expect(gw.publisher.jobs).toHaveLength(1);
+    const again = await gw.app.inject({ method: 'POST', url: '/webhooks/blog', headers: auth, payload: post });
+    expect(again.json()).toMatchObject({ duplicate: true, eventId: later.json().eventId });
+    expect(gw.publisher.jobs).toHaveLength(1);
+  });
+
   it('prefers the Idempotency-Key header', async () => {
     gw = await buildTestGateway();
     const a = await gw.app.inject({ method: 'POST', url: '/webhooks/blog', headers: { ...auth, 'idempotency-key': 'delivery-1' }, payload: { id: 'x' } });
@@ -258,8 +277,8 @@ describe('webhook gateway: rate limiting and backpressure', () => {
       statuses.push(last.statusCode);
     }
     expect(statuses).toEqual([202, 202, 202, 429, 429]);
-    expect(last!.json().error.code).toBe('RATE_LIMITED');
-    expect(Number(last!.headers['retry-after'])).toBeGreaterThan(0);
+    expect(last?.json().error.code).toBe('RATE_LIMITED');
+    expect(Number(last?.headers['retry-after'])).toBeGreaterThan(0);
   });
 
   it('applies one per-IP bucket to unknown endpoints so random slugs cannot bypass the limit', async () => {

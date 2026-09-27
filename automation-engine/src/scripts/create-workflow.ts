@@ -2,11 +2,15 @@
  * Creates or updates a user, credentials, a webhook endpoint and workflows from
  * a JSON definition, then tells running gateways/workers to reload.
  *
- *   npm run workflow:create -- examples/blog-to-telegram.workflow.json [--rotate-token]
+ *   npm run workflow:create -- examples/blog-to-telegram.workflow.json [--rotate-token] [--pause-others]
  *   node dist/scripts/create-workflow.js examples/blog-to-telegram.workflow.json
+ *
+ * --rotate-token  issue a new bearer token (the old one stops working)
+ * --pause-others  pause other active workflows on the same endpoint that are not in the file
  */
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { loadConfig } from '../config.js';
 import { createPrismaClient } from '../database/prisma.js';
@@ -48,8 +52,9 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const file = args.find((a) => !a.startsWith('--'));
   const rotateToken = args.includes('--rotate-token');
+  const pauseOthers = args.includes('--pause-others');
   if (!file) {
-    process.stderr.write('usage: create-workflow <definition.json> [--rotate-token]\n');
+    process.stderr.write('usage: create-workflow <definition.json> [--rotate-token] [--pause-others]\n');
     process.exit(2);
   }
 
@@ -75,9 +80,9 @@ async function main(): Promise<void> {
   }
 
   const prisma = createPrismaClient({ databaseUrl: config.DATABASE_URL, poolSize: 2, logger });
-  let issuedToken: string | null = null;
   try {
     const summary = await prisma.$transaction(async (tx) => {
+      let issuedToken: string | null = null;
       const user = await tx.user.upsert({
         where: { email: definition.owner.email },
         create: { email: definition.owner.email, name: definition.owner.name ?? null },
@@ -138,7 +143,7 @@ async function main(): Promise<void> {
           position: index,
           key: step.key ?? `step_${index + 1}`,
           type: step.type,
-          config: step.config as object,
+          config: step.config as Prisma.InputJsonObject,
           runIf: step.runIf ?? null,
           timeoutMs: step.timeoutMs ?? null,
           credentialId: step.credential ? (credentialIds.get(step.credential) ?? null) : null,
@@ -173,7 +178,16 @@ async function main(): Promise<void> {
         }
         workflowSummaries.push({ id: saved.id, name: saved.name, version: saved.version, event: saved.triggerEvent });
       }
-      return { endpoint, workflows: workflowSummaries };
+
+      // Workflows on this endpoint that the file does not define also run for every event.
+      const others = await tx.workflow.findMany({
+        where: { endpointId: endpoint.id, status: 'ACTIVE', name: { notIn: definition.workflows.map((w) => w.name) } },
+        select: { id: true, name: true, triggerEvent: true },
+      });
+      if (pauseOthers && others.length > 0) {
+        await tx.workflow.updateMany({ where: { id: { in: others.map((o) => o.id) } }, data: { status: 'PAUSED', version: { increment: 1 } } });
+      }
+      return { endpoint, workflows: workflowSummaries, others, issuedToken };
     });
 
     const redis = createRedisConnection(config.REDIS_URL, 'client', logger);
@@ -187,14 +201,21 @@ async function main(): Promise<void> {
       await closeRedis(redis);
     }
 
-    const url = `http://localhost:${config.PORT}/webhooks/${summary.endpoint.slug}`;
+    const url = `${config.PUBLIC_BASE_URL ?? `http://localhost:${config.PORT}`}/webhooks/${summary.endpoint.slug}`;
     process.stdout.write(`\n✓ endpoint "${summary.endpoint.slug}" (${summary.endpoint.authType})  ${url}\n`);
     for (const wf of summary.workflows) process.stdout.write(`✓ workflow "${wf.name}" v${wf.version} on "${wf.event}"  id=${wf.id}\n`);
+    for (const other of summary.others) {
+      process.stdout.write(
+        pauseOthers
+          ? `✓ paused other workflow "${other.name}" on "${other.triggerEvent}"  id=${other.id}\n`
+          : `! also active on this endpoint (runs for "${other.triggerEvent}" too): "${other.name}"  id=${other.id}  (re-run with --pause-others to pause it)\n`,
+      );
+    }
 
     if (summary.endpoint.authType === 'BEARER') {
-      if (issuedToken) {
-        process.stdout.write(`\nWebhook token (shown once, store it now):\n  ${issuedToken}\n`);
-        process.stdout.write(`\nTest it:\n  curl -sS -X POST ${url} -H 'content-type: application/json' -H 'authorization: Bearer ${issuedToken}' --data-binary @examples/post-published.json\n`);
+      if (summary.issuedToken) {
+        process.stdout.write(`\nWebhook token (shown once, store it now):\n  ${summary.issuedToken}\n`);
+        process.stdout.write(`\nTest it:\n  curl -sS -X POST ${url} -H 'content-type: application/json' -H 'authorization: Bearer ${summary.issuedToken}' --data-binary @examples/post-published.json\n`);
       } else {
         process.stdout.write('\nExisting webhook token kept (re-run with --rotate-token to issue a new one).\n');
       }

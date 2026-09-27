@@ -69,9 +69,12 @@ export class CredentialCipher {
   }
 }
 
+/** Telegram bot token shape: <bot id>:<secret>. */
+export const TELEGRAM_BOT_TOKEN_PATTERN = /^\d{5,16}:[A-Za-z0-9_-]{30,64}$/;
+
 /** Shapes of decrypted credential data per provider. */
 export const credentialSchemas = {
-  telegram: z.object({ botToken: z.string().regex(/^\d{5,16}:[A-Za-z0-9_-]{30,64}$/, 'invalid Telegram bot token format') }),
+  telegram: z.object({ botToken: z.string().regex(TELEGRAM_BOT_TOKEN_PATTERN, 'invalid Telegram bot token format') }),
   http: z.object({ headers: z.record(z.string(), z.string()).default({}) }),
 } as const;
 

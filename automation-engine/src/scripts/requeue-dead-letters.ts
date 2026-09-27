@@ -32,7 +32,12 @@ async function main(): Promise<void> {
   const list = args.includes('--list');
   const discard = args.includes('--discard');
   const dryRun = args.includes('--dry-run');
-  const limit = Math.min(Number(argValue(args, '--limit') ?? 100), 10_000);
+  const limitArg = argValue(args, '--limit');
+  const limit = limitArg === undefined ? 100 : Number(limitArg);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) {
+    process.stderr.write('--limit must be an integer between 1 and 10000\n');
+    process.exit(2);
+  }
 
   if (!list && !id && !all) {
     process.stderr.write('usage: requeue-dead-letters (--list | --id <id> | --all) [--limit N] [--dry-run] [--discard]\n');

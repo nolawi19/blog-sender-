@@ -1,7 +1,16 @@
 {
-  "owner": { "email": "owner@example.com", "name": "Blog Owner" },
+  "owner": {
+    "email": "owner@example.com",
+    "name": "Blog Owner"
+  },
   "credentials": [
-    { "name": "telegram-bot", "provider": "telegram", "fromEnv": { "botToken": "TELEGRAM_BOT_TOKEN" } }
+    {
+      "name": "telegram-bot",
+      "provider": "telegram",
+      "fromEnv": {
+        "botToken": "TELEGRAM_BOT_TOKEN"
+      }
+    }
   ],
   "endpoint": {
     "slug": "blog-signed",
@@ -13,31 +22,32 @@
   "workflows": [
     {
       "name": "Rich blog announcement",
-      "description": "HTML caption with escaping, photo when available, text message fallback otherwise.",
-      "trigger": { "type": "webhook", "event": "post.published" },
+      "description": "HMAC-signed endpoint: HTML caption with escaping, photo when the post has a usable image, text message otherwise. Sends to TELEGRAM_CHANNEL_ID.",
+      "trigger": {
+        "type": "webhook",
+        "event": "post.published"
+      },
       "steps": [
         {
           "key": "photo",
           "type": "telegram.sendPhoto",
           "credential": "telegram-bot",
-          "runIf": "{{trigger.body.image}}",
+          "runIf": "{{trigger.body.image | http_url}}",
           "timeoutMs": 10000,
           "config": {
-            "chatId": "{{trigger.body.telegram_chat_id}}",
-            "photo": "{{trigger.body.image}}",
+            "photo": "{{trigger.body.image | http_url}}",
             "parseMode": "HTML",
-            "caption": "<b>{{trigger.body.title | escape_html}}</b>\n{{trigger.body.excerpt | strip_html | truncate:700 | escape_html}}\n\n✍️ {{trigger.body.author.name | default:\"Editorial team\" | escape_html}}\n<a href=\"{{trigger.body.url | escape_html}}\">Read more</a>"
+            "caption": "<b>{{trigger.body.title | default:\"New post\" | decode_entities | truncate:200 | escape_html}}</b>\n{{trigger.body.excerpt | strip_html | truncate:600 | escape_html}}\n\n✍️ {{trigger.body.author.name | default:\"Editorial team\" | escape_html}}\n<a href=\"{{trigger.body.url | escape_html}}\">Read more</a>"
           }
         },
         {
           "key": "text_fallback",
           "type": "telegram.sendMessage",
           "credential": "telegram-bot",
-          "runIf": "{{trigger.body.image | not}}",
+          "runIf": "{{trigger.body.image | http_url | not}}",
           "config": {
-            "chatId": "{{trigger.body.telegram_chat_id}}",
             "parseMode": "HTML",
-            "text": "<b>{{trigger.body.title | escape_html}}</b>\n{{trigger.body.url | escape_html}}",
+            "text": "<b>{{trigger.body.title | default:\"New post\" | decode_entities | truncate:200 | escape_html}}</b>\n{{trigger.body.excerpt | strip_html | truncate:1500 | escape_html}}\n\n<a href=\"{{trigger.body.url | escape_html}}\">Read more</a>",
             "disableWebPagePreview": false
           }
         }

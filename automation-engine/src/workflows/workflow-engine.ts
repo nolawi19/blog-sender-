@@ -168,15 +168,26 @@ export class WorkflowEngine {
         record.output = result.output;
         stepOutputs[step.key] = { output: result.output };
         finish();
-        if (!isLast && input.onStepCompleted) {
-          await input.onStepCompleted(step.key, { output: result.output, completedAt: record.finishedAt });
-        }
       } catch (raw) {
         const error = classifyError(raw);
         record.status = 'failed';
         record.error = serializeError(error);
         finish();
         throw new StepFailedError(error, record, records);
+      }
+
+      // Outside the try: the step already succeeded (e.g. the message was sent), so
+      // failing to save resume state must not mark it failed and trigger a retry
+      // that would repeat it. The execution simply continues.
+      if (!isLast && input.onStepCompleted) {
+        try {
+          await input.onStepCompleted(step.key, { output: record.output, completedAt: record.finishedAt });
+        } catch (err) {
+          this.options.logger.warn(
+            { err, executionId: input.executionId, workflowId: workflow.id, stepKey: step.key },
+            'could not save step resume state; continuing without it',
+          );
+        }
       }
     }
 

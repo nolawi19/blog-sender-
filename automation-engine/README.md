@@ -104,17 +104,19 @@ automation-engine/
 │   ├── lib/shutdown.ts              # ordered graceful shutdown with timeout
 │   ├── scripts/create-workflow.ts   # create/update user, credentials, endpoint, workflows
 │   ├── scripts/requeue-dead-letters.ts  # list / requeue / discard dead letters safely
+│   ├── scripts/check-telegram.ts    # verify bot token, channel and admin rights (never prints secrets)
 │   ├── scripts/mock-telegram.ts     # mock Telegram API for tests and benchmarks
 │   └── types/workflow.ts            # normalized event, job payload, workflow definitions
 ├── prisma/schema.prisma             # + prisma/migrations/
 ├── tests/                           # Vitest unit tests, integration test, benchmarks
 ├── bench/load-test.ts               # open-loop / max-throughput load test (undici, autocannon)
 ├── bench/k6-webhook.js              # k6 constant-arrival-rate scenario
-├── examples/                        # workflow definitions and a sample payload
+├── examples/                        # workflow definitions and test payloads
+├── apps-script/                     # Google Apps Script: Blogger feed -> webhook (diagnostics + reference script)
 ├── docker/redis.conf                # Redis tuned for BullMQ (noeviction, AOF)
 ├── Dockerfile, docker-compose.yml, docker-compose.dev.yml
 ├── .env.example, .gitignore, .dockerignore
-├── package.json, tsconfig.json, tsconfig.build.json, vitest.config.ts
+├── package.json, tsconfig.json, tsconfig.build.json, vitest.config.ts, eslint.config.js
 └── README.md
 ```
 
@@ -133,6 +135,7 @@ sed -i "s/^ENCRYPTION_KEY=.*/ENCRYPTION_KEY=$(openssl rand -hex 32)/" .env
 sed -i "s/^WEBHOOK_SECRET=.*/WEBHOOK_SECRET=$(openssl rand -hex 32)/" .env
 # Then edit .env and set TELEGRAM_BOT_TOKEN=<token from BotFather>
 # and TELEGRAM_CHANNEL_ID=<@yourchannel or -100… channel ID> (the bot must be a channel admin)
+# WEBHOOK_SECRET and ENCRYPTION_KEY are required; the gateway and worker refuse to start without them.
 
 # Build and start PostgreSQL, Redis, migrations, gateway and worker
 docker compose up -d --build
@@ -143,26 +146,26 @@ docker compose run --rm gateway node dist/scripts/create-workflow.js examples/bl
 export WEBHOOK_TOKEN=<token printed above>
 ```
 
-Find your chat id: send any message to your bot, then
-`curl -s "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getUpdates"` and read `result[].message.chat.id`.
-
-Send a test webhook:
+Check the Telegram side (token valid, destination is a channel, bot is an admin; `--send-test` posts one message):
 
 ```bash
-export TELEGRAM_CHAT_ID=<your chat id>
-sed "s/REPLACE_WITH_YOUR_CHAT_ID/$TELEGRAM_CHAT_ID/" examples/post-published.json > /tmp/post.json
+docker compose exec worker node dist/scripts/check-telegram.js --send-test
+```
 
+Send a test webhook (the destination is always `TELEGRAM_CHANNEL_ID`; the payload carries no chat id):
+
+```bash
 curl -i -X POST http://localhost:3001/webhooks/blog \
   -H 'content-type: application/json' \
   -H "authorization: Bearer $WEBHOOK_TOKEN" \
-  --data-binary @/tmp/post.json
-# HTTP/1.1 202 Accepted  + {"accepted":true,"eventId":"…","executions":[{"executionId":"…"}]}
+  --data-binary @examples/test-post-with-image.json
+# HTTP/1.1 202 Accepted  + {"accepted":true,"duplicate":false,"eventId":"…","executions":[{"executionId":"…"}]}
 ```
 
 Verify the Telegram execution:
 
 ```bash
-# 1. The photo appears in your Telegram chat.
+# 1. The photo appears in your Telegram channel.
 # 2. Worker log line with per-stage latency:
 docker compose logs worker | grep '"execution succeeded"' | tail -1
 # 3. Execution record:
@@ -179,11 +182,13 @@ The gateway is published on host port **3001** (`3001:3000` in `docker-compose.y
 
 `examples/blog-to-telegram.workflow.json` posts every `post.published` event to the channel in `TELEGRAM_CHANNEL_ID`:
 
-- **Post with a usable image** (`image` is an absolute http(s) URL): `telegram.sendPhoto` with the image and a caption containing the title, the excerpt (HTML stripped, truncated) and the post URL.
-- **Post without an image** (`image` empty, missing, `null` or not a URL): `telegram.sendMessage` with the same title, excerpt and URL; `sendPhoto` is never called.
-- **Image URL Telegram cannot use** (unreachable, not an image, caption too long): the photo step sends the caption as a text message instead (`fallbackToMessage`), so the execution still succeeds.
+- **Post with a usable image** (`image` is an absolute http(s) URL; `//host/…` is upgraded to https): `telegram.sendPhoto` with the image and a caption containing the title, the excerpt (HTML stripped, truncated) and the post URL.
+- **Post without a usable image** (`image` empty, missing, `null`, relative such as `/img/a.jpg`, malformed or not http(s)): `telegram.sendMessage` with the same title, excerpt and URL; `sendPhoto` is never called.
+- **Image URL Telegram cannot use** (unreachable, not an image, caption too long): the photo step sends the caption as a text message instead, so the execution still succeeds. The rejected URL is remembered for 15 minutes, so a retry goes straight to the text message.
 
-The destination comes from `TELEGRAM_CHANNEL_ID` (`@channelusername` for a public channel, or the `-100…` channel ID); the Blogger payload does not need to carry a chat ID. Personal chat IDs are rejected at startup. Test payloads for each case are in `examples/test-post-*.json`.
+The Telegram driver enforces the same rules for any workflow: `telegram.sendPhoto` never calls Telegram with an empty, relative or malformed photo, and falls back to a text message with the caption unless the step sets `"fallbackToMessage": false`. Older workflow definitions (for example one that still has `"chatId": "{{trigger.body.telegram_chat_id}}"` and `"photo": "{{trigger.body.image}}"`) therefore also deliver Blogger posts, which carry no `telegram_chat_id`, to `TELEGRAM_CHANNEL_ID`; re-run `create-workflow` anyway to get the formatted caption.
+
+The destination comes from `TELEGRAM_CHANNEL_ID` (`@channelusername` for a public channel, or the `-100…` channel ID); the Blogger payload does not need to carry a chat ID. Personal chat IDs are rejected at startup. If `TELEGRAM_CHANNEL_ID` is missing, the worker logs `TELEGRAM_CHANNEL_ID is required but not set` at startup and each Telegram step fails once (no retries, no Telegram call) with `TELEGRAM_CHAT_MISSING: TELEGRAM_CHANNEL_ID is required: set it in .env …`; after fixing `.env` and recreating the worker, requeue those events (see below). Test payloads for each case are in `examples/test-post-*.json`.
 
 **Verify the channel setup** (read-only; add `--send-test` to post one real test message):
 
@@ -193,13 +198,15 @@ docker compose exec worker node dist/scripts/check-telegram.js
 
 It reports whether `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHANNEL_ID` are SET (never their values), whether the token is valid, whether the destination is a *channel* (not a personal chat) and whether the bot is an administrator with the **Post messages** permission. Telegram errors in the worker also carry a `hint` with the exact fix (e.g. "Add the bot to the channel as an administrator with the "Post messages" permission.").
 
-**Duplicates.** A post `id` is accepted once. Redis answers repeats within `IDEMPOTENCY_TTL_SEC`; after that the gateway checks the `idempotency_keys` table (`IDEMPOTENCY_DURABLE=true`, the default), so re-running `sendExistingPosts()` or polling old posts days later does not re-post them.
+**Duplicates.** A post `id` is accepted once. Redis answers repeats within `IDEMPOTENCY_TTL_SEC`; after that the gateway checks the `idempotency_keys` table (`IDEMPOTENCY_DURABLE=true`, the default), so re-running `sendExistingPosts()` or polling old posts days later does not re-post them. An event that matches no active workflow is answered `202` with `"executions": []` and is **not** recorded, so it runs normally when it is sent again after the workflow exists (the reference Apps Script retries such posts on its next run).
 
 **Google Apps Script.** `apps-script/AutomationEngineTools.gs` can be added as a new file to your existing Apps Script project (all names start with `ae`, nothing is replaced): run `aeDiagnose()` for a read-only report (triggers and duplicates, Script Property names, tunnel `/health`, photo/text decision for the latest posts), `aeEnsureTrigger()` to have exactly one 5-minute trigger (set `AE_POLL_HANDLER` to your polling function's name), and use `aeExtractImage(entry)` for robust image detection. `apps-script/BloggerToTelegram.gs` is an optional complete reference script (`sendExistingPosts`, `checkNewPosts`, `setupTrigger`) that reads `WEBHOOK_URL` and `WEBHOOK_TOKEN` from Script Properties.
 
 **Cloudflare Quick Tunnel.** A `trycloudflare.com` URL exists only while that `cloudflared` process runs, and a new URL is issued every time it restarts; the Apps Script webhook URL must then be updated. A permanent URL needs a named tunnel on a domain in your Cloudflare account (`cloudflared tunnel create` / `cloudflared tunnel route dns`).
 
-Posts that were dead-lettered before a fix cannot be re-sent from the Apps Script (their `id` is already recorded for idempotency). Requeue them instead: `docker compose run --rm gateway node dist/scripts/requeue-dead-letters.js --list`, then `--id <id>` or `--all`. They run with the current workflow version.
+Posts that were dead-lettered before a fix cannot be re-sent from the Apps Script (their `id` is already recorded for idempotency). Requeue them instead: `docker compose exec worker node dist/scripts/requeue-dead-letters.js --list`, then `--id <id>` or `--all`. They run with the current workflow version and configuration.
+
+`create-workflow` reports any other workflow that is still active on the same endpoint (it would also run for every post); add `--pause-others` to pause it.
 
 Scale workers horizontally: `docker compose up -d --scale worker=3`.
 Stop gracefully (drains in-flight requests and jobs): `docker compose stop`.
@@ -209,13 +216,13 @@ Stop gracefully (drains in-flight requests and jobs): `docker compose stop`.
 ```bash
 cd automation-engine
 npm ci
-cp .env.example .env                        # set ENCRYPTION_KEY, WEBHOOK_SECRET, TELEGRAM_BOT_TOKEN as above
+cp .env.example .env                        # set ENCRYPTION_KEY, WEBHOOK_SECRET, TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID as above
 
 # PostgreSQL + Redis in Docker, published on 127.0.0.1 only
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres redis
 
 npm run db:migrate                          # prisma migrate deploy
-npm run dev:gateway                         # terminal 1 (listens on PORT from .env; use PORT=3001 if 3000 is taken)
+npm run dev:gateway                         # terminal 1 (listens on PORT from .env: 3001 in .env.example)
 npm run dev:worker                          # terminal 2 (metrics on :9464)
 npm run workflow:create -- examples/blog-to-telegram.workflow.json
 ```
@@ -231,13 +238,13 @@ Production-style on the host: `npm run build && npm run start:gateway` and `npm 
 ```bash
 for i in 1 2; do
   curl -s -X POST localhost:3001/webhooks/blog -H 'content-type: application/json' \
-    -H "authorization: Bearer $WEBHOOK_TOKEN" --data-binary @/tmp/post.json; echo
+    -H "authorization: Bearer $WEBHOOK_TOKEN" --data-binary @examples/test-post-with-image.json; echo
 done
 # 1st: 202 {"duplicate":false,"eventId":"X",…}
 # 2nd: 200 {"duplicate":true,"eventId":"X",…}   ← same event id, no second Telegram message
 ```
 
-Key precedence: `Idempotency-Key` header → `X-Event-Id` header → the endpoint's `idempotencyField` in the body (`"id"` in the example) → SHA-256 of the raw body (if `dedupeByPayloadHash`). Keys live in Redis for `IDEMPOTENCY_TTL_SEC` (24 h default) and are recorded in the `idempotency_keys` table.
+Key precedence: `Idempotency-Key` header → `X-Event-Id` header → the endpoint's `idempotencyField` in the body (`"id"` in the example) → SHA-256 of the raw body (if `dedupeByPayloadHash`). Keys live in Redis for `IDEMPOTENCY_TTL_SEC` (24 h default) and are recorded in the `idempotency_keys` table, which the gateway consults after the Redis key expires (`IDEMPOTENCY_DURABLE`).
 
 ### Retries with exponential backoff (mock Telegram failing twice)
 
@@ -247,9 +254,9 @@ MOCK_FAIL_FIRST=2 docker compose --profile bench up -d mock-telegram
 docker compose up -d worker                  # pick up the new base URL
 curl -s -X POST localhost:3001/webhooks/blog -H 'content-type: application/json' \
   -H "authorization: Bearer $WEBHOOK_TOKEN" \
-  --data-binary '{"id":"retry-demo","title":"Retry demo","image":"https://example.com/a.jpg","telegram_chat_id":"42"}'
+  --data-binary '{"id":"retry-demo","title":"Retry demo","url":"https://example.com/retry"}'
 docker compose logs worker | grep -E 'retry scheduled|execution succeeded' | tail -3
-# two "execution failed; retry scheduled" lines, then "execution succeeded"; executions.attempts = 3
+# the driver retries the 5xx once inline, then "execution failed; retry scheduled", then "execution succeeded" (attempts = 2)
 ```
 
 Host development equivalent: `MOCK_FAIL_FIRST=2 npm run mock:telegram` and restart `npm run dev:worker`.
@@ -260,12 +267,12 @@ Host development equivalent: `MOCK_FAIL_FIRST=2 npm run mock:telegram` and resta
 MOCK_ERROR_RATE=1 docker compose --profile bench up -d mock-telegram      # every call fails with 500
 curl -s -X POST localhost:3001/webhooks/blog -H 'content-type: application/json' \
   -H "authorization: Bearer $WEBHOOK_TOKEN" \
-  --data-binary '{"id":"dlq-demo","title":"DLQ demo","image":"https://example.com/a.jpg","telegram_chat_id":"42"}'
+  --data-binary '{"id":"dlq-demo","title":"DLQ demo","url":"https://example.com/dlq"}'
 # after MAX_RETRIES+1 attempts (default backoff: up to 1 s, 2 s, 4 s, 8 s, 16 s; each delay is jittered between 50% and 100%):
-docker compose run --rm gateway node dist/scripts/requeue-dead-letters.js --list
+docker compose exec worker node dist/scripts/requeue-dead-letters.js --list
 
 MOCK_ERROR_RATE=0 docker compose --profile bench up -d mock-telegram      # "fix" Telegram
-docker compose run --rm gateway node dist/scripts/requeue-dead-letters.js --all
+docker compose exec worker node dist/scripts/requeue-dead-letters.js --all
 # requeued 1/1 dead-letter job(s); running it again requeues nothing (claims are atomic)
 ```
 
@@ -279,7 +286,7 @@ Permanent errors (400 Bad Request, invalid token, template/config errors) are de
 ```bash
 docker compose run --rm gateway node dist/scripts/create-workflow.js examples/blog-to-telegram-advanced.workflow.json
 WEBHOOK_SECRET=$(grep '^WEBHOOK_SECRET=' .env | cut -d= -f2-)
-BODY=$(cat /tmp/post.json)
+BODY=$(cat examples/test-post-with-image.json)
 TS=$(date +%s)
 SIG=$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" -hex | sed 's/^.* //')
 curl -i -X POST localhost:3001/webhooks/blog-signed -H 'content-type: application/json' \
@@ -290,8 +297,10 @@ curl -i -X POST localhost:3001/webhooks/blog-signed -H 'content-type: applicatio
 
 ```bash
 npm test                      # unit tests (no external services needed)
-npm run test:integration      # real Redis + BullMQ pipeline (uses redis://localhost:6379/15)
-npm run typecheck
+npm run test:integration      # real Redis + BullMQ pipeline (redis://localhost:6379/15, or INTEGRATION_REDIS_URL)
+npm run typecheck             # tsc --noEmit (strict)
+npm run lint                  # ESLint with type-aware typescript-eslint rules
+npm run build                 # compile to dist/
 npm run bench:mapper          # template mapper micro-benchmarks
 ```
 
@@ -353,10 +362,11 @@ A definition file (see `examples/`) contains an owner, credentials (values read 
       "key": "announce",
       "type": "telegram.sendPhoto",
       "credential": "telegram-bot",
+      "runIf": "{{trigger.body.image | http_url}}",
       "config": {
-        "chatId": "{{trigger.body.telegram_chat_id}}",
-        "photo": "{{trigger.body.image}}",
-        "caption": "{{trigger.body.title}}"
+        "photo": "{{trigger.body.image | http_url}}",
+        "parseMode": "HTML",
+        "caption": "<b>{{trigger.body.title | default:\"New post\" | decode_entities | truncate:200 | escape_html}}</b>\n\n{{trigger.body.url | escape_html}}"
       }
     }
   ]
@@ -366,8 +376,8 @@ A definition file (see `examples/`) contains an owner, credentials (values read 
 - `trigger.event` matches the event type (`X-Event-Type` header → `body.type` → `body.event` → endpoint default); `"*"` matches everything.
 - Steps run in order; each step's output is available to later steps as `{{steps.<key>.output...}}`.
 - Optional per step: `runIf` (template; the step runs only if it renders truthy), `timeoutMs`, `credential`.
-- Telegram steps without `chatId` (or with an empty one) send to `TELEGRAM_CHANNEL_ID`. `telegram.sendPhoto` accepts `"fallbackToMessage": true` to deliver the caption as text when the photo is missing or rejected by Telegram.
-- Re-running `create-workflow` updates the workflow (version + 1) and tells running processes to reload.
+- Telegram steps without `chatId` (or with an empty one) send to `TELEGRAM_CHANNEL_ID`; an explicit `chatId` (e.g. from the payload) still takes precedence. `telegram.sendPhoto` accepts an absolute http(s) URL or a Telegram `file_id`; when the photo is missing, invalid or rejected by Telegram it delivers the caption as a text message (set `"fallbackToMessage": false` to fail the step instead).
+- Re-running `create-workflow` updates the workflow (version + 1) and tells running processes to reload. It keeps the existing webhook token unless `--rotate-token` is given, and reports (or with `--pause-others`, pauses) other active workflows on the same endpoint.
 
 Every job receives this normalized event as `trigger`:
 
@@ -446,11 +456,11 @@ A generic SSRF-protected `http.request` action is already built in (`url`, `meth
 ## Reliability
 
 - **Acknowledge fast, execute asynchronously**: the gateway returns 202 once the job is in Redis; Telegram is never on the request path.
-- **Idempotency**: atomic Redis claim per endpoint + key; the claim is released if enqueueing fails, so the sender's retry is accepted.
+- **Idempotency**: atomic Redis claim per endpoint + key, backed by the `idempotency_keys` table once the Redis key has expired; the claim is released if enqueueing fails, and events that match no workflow are not claimed, so the sender's retry is accepted.
 - **Error classification** (`src/errors.ts`): validation, authentication, configuration, template → permanent; network, timeout, rate limit, 5xx external API, Redis, transient PostgreSQL → retryable; unknown → not retried (dead-lettered, requeue manually).
 - **Retries**: BullMQ attempts = `MAX_RETRIES + 1`, custom backoff = exponential with jitter (`RETRY_BASE_DELAY_MS` doubling, capped at `RETRY_MAX_DELAY_MS`), honoring Telegram's `retry_after` exactly. The Telegram driver also retries inline once for failures where the request provably never reached Telegram (connect errors) and for 5xx.
 - **Rate limits are not failures**: Telegram 429s and client-side throttling (token buckets per bot and per chat) postpone the job with BullMQ `moveToDelayed` without consuming a retry attempt, for up to `JOB_RATE_LIMIT_MAX_DEFER_MS`.
-- **Step-level resume**: after each successful step (except the last) the step output is saved on the job; retries and requeues skip completed steps, so a multi-step workflow does not repeat an already-sent message.
+- **Step-level resume**: after each successful step (except the last) the step output is saved on the job; retries and requeues skip completed steps, so a multi-step workflow does not repeat an already-sent message. If saving that state fails (e.g. a Redis hiccup), the step still counts as succeeded and the execution continues instead of retrying.
 - **Dead letters**: permanent failures and exhausted retries are written to `dead_letter_jobs` (with the resume state) and to the `automation-dead-letter` BullMQ queue; requeue is atomic per row.
 - **Timeouts**: HTTP headers/body timeout (`HTTP_TIMEOUT_MS`), per-step (`STEP_TIMEOUT_MS` or `timeoutMs`), per-job (`JOB_TIMEOUT_MS`).
 - **Crash recovery**: jobs held by a crashed worker become "stalled" after the lock expires and are retried by another worker (BullMQ `lockDuration`/`stalledInterval`).
@@ -481,13 +491,14 @@ All variables are documented in [`.env.example`](.env.example) and validated at 
 | Variable | Default | Purpose |
 |---|---|---|
 | `NODE_ENV` | `development` | runtime mode |
-| `PORT`, `HOST` | `3000`, `0.0.0.0` | gateway listen address |
+| `PORT`, `HOST` | `3000`, `0.0.0.0` | gateway listen address (`.env.example` uses 3001 for host development; Docker Compose always listens on 3000 in the container, published on host port 3001) |
+| `PUBLIC_BASE_URL` | `http://localhost:3001` (Compose) | base URL printed by `create-workflow` |
 | `DATABASE_URL` | — | PostgreSQL connection (pool size via `DATABASE_POOL_SIZE`) |
 | `REDIS_URL` | `redis://localhost:6379` | Redis for BullMQ, idempotency, cache invalidation |
 | `WORKER_CONCURRENCY` | `50` | concurrent jobs per worker process |
-| `WEBHOOK_SECRET` | — | default HMAC secret (min 16 chars) |
+| `WEBHOOK_SECRET` | — | default HMAC secret (min 16 chars, required; the old `.env.example` placeholder is rejected) |
 | `ENCRYPTION_KEY` | — | 32-byte key (64 hex chars) for credential encryption |
-| `TELEGRAM_BOT_TOKEN` | — | fallback bot token for steps without a credential |
+| `TELEGRAM_BOT_TOKEN` | — | bot token from @BotFather (format-checked at startup, never printed) |
 | `TELEGRAM_CHANNEL_ID` | — | default destination: `@channelusername` or `-100…` channel ID |
 | `HTTP_TIMEOUT_MS` | `10000` | outbound headers/body timeout |
 | `MAX_RETRIES` | `5` | retries after the first attempt |
@@ -498,6 +509,7 @@ All variables are documented in [`.env.example`](.env.example) and validated at 
 
 - Telegram has no idempotency key: if a request times out after Telegram accepted it, the retry can post twice (at-least-once delivery). Only connect-phase failures are retried inline, where a duplicate is impossible.
 - Client-side Telegram token buckets are per worker process; with N workers the effective client-side ceiling is N × the configured rate. Telegram's own 429 responses are still honored.
-- The Redis idempotency window is `IDEMPOTENCY_TTL_SEC`; the `idempotency_keys` table is an audit trail and is not consulted on the hot path.
+- The Redis idempotency window is `IDEMPOTENCY_TTL_SEC`; after it, the `idempotency_keys` table is consulted (one indexed lookup, only for keys Redis has not seen). If PostgreSQL is unreachable at that moment the event is accepted (availability first) and a warning is logged.
 - Cross-process latency relies on the host clock; compare gateway and worker timings only on NTP-synchronized hosts.
 - Execution records are written asynchronously: a hard crash can lose up to `RECORDER_FLUSH_INTERVAL_MS` of records (not jobs). Redis AOF `everysec` can lose up to ~1 s of accepted jobs if Redis itself crashes.
+- Third-party notices you may see, none caused by this project: Redis logs `WARNING Memory overcommit must be enabled` (a host kernel setting, `vm.overcommit_memory=1`, that containers cannot change; harmless at this scale), the PostgreSQL image prints two `initdb` notices the first time it creates the database volume, and `npm ci` reports `cron-parser@4` as deprecated (a dependency of BullMQ 5; repeatable jobs, which use it, are not used here).

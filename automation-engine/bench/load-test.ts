@@ -5,9 +5,13 @@
  *
  *   npm run bench:load -- --token <webhook token> [--rates 100,500,1000,5000]
  *        [--duration 20] [--connections 64] [--mode open|max]
- *        [--url http://localhost:3000/webhooks/blog]
- *        [--gateway http://localhost:3000] [--worker http://localhost:9464[,http://localhost:9465]]
+ *        [--url http://localhost:3001/webhooks/blog]
+ *        [--gateway http://localhost:3001] [--worker http://localhost:9464[,http://localhost:9465]]
  *        [--chats 1000]
+ *
+ * --chats spreads a telegram_chat_id field over N values; it only matters for
+ * workflows that take chatId from the payload (the Blogger workflow sends every
+ * post to TELEGRAM_CHANNEL_ID, so raise the per-chat rate limit when benchmarking).
  *
  * Modes:
  *  - open (default): open-loop constant arrival rate. Request i is scheduled at
@@ -59,12 +63,12 @@ function parseArgs(argv: string[]): Args {
   }
   return {
     mode,
-    url: get('url', 'http://localhost:3000/webhooks/blog') as string,
+    url: get('url', 'http://localhost:3001/webhooks/blog') as string,
     token,
     rates: (get('rates', '100,500,1000,5000') as string).split(',').map(Number),
     duration: Number(get('duration', '20')),
     connections: Number(get('connections', '64')),
-    gateway: get('gateway', 'http://localhost:3000') as string,
+    gateway: get('gateway', 'http://localhost:3001') as string,
     worker: get('worker', 'http://localhost:9464') as string,
     chats: Number(get('chats', '1000')),
   };

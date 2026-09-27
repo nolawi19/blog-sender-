@@ -80,18 +80,37 @@ export class ShutdownManager {
       return code;
     })();
 
-    this.running = Promise.race([work, timeout]).then((result) => {
+    this.running = Promise.race([work, timeout]).then(async (result) => {
       if (timer) clearTimeout(timer);
       if (result === 'timeout') {
         this.logger.error({ timeoutMs: this.timeoutMs }, 'graceful shutdown timed out, forcing exit');
-        this.logger.flush?.();
+        await this.flushLogs();
         this.exit(1);
         return;
       }
       this.logger.info({ exitCode: result }, 'graceful shutdown complete');
-      this.logger.flush?.();
+      await this.flushLogs();
       this.exit(result);
     });
     return this.running;
+  }
+
+  /**
+   * Waits (briefly) for the asynchronous log destination to finish writing.
+   * Exiting while a write is still in flight can drop or reorder the last lines.
+   */
+  private flushLogs(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const fallback = setTimeout(resolve, 1_000);
+      try {
+        this.logger.flush(() => {
+          clearTimeout(fallback);
+          resolve();
+        });
+      } catch {
+        clearTimeout(fallback);
+        resolve();
+      }
+    });
   }
 }

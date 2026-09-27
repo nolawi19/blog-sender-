@@ -130,7 +130,15 @@ function btPost_(payload) {
       muteHttpExceptions: true,
     });
     var code = res.getResponseCode();
-    if (code === 202) return 'accepted';
+    if (code === 202) {
+      // 202 with no executions: the engine has no active workflow for this event.
+      // Leave the post unmarked so it is sent again once the workflow is active.
+      if (btNoExecutions_(res.getContentText())) {
+        Logger.log('Post ' + payload.id + ': accepted but no active workflow ran (run create-workflow on the engine). Will retry.');
+        return 'failed';
+      }
+      return 'accepted';
+    }
     if (code === 200) return 'duplicate';
     if (code === 401) return 'unauthorized';
     Logger.log('Post ' + payload.id + ': HTTP ' + code + ' ' + String(res.getContentText()).slice(0, 200));
@@ -138,6 +146,15 @@ function btPost_(payload) {
   } catch (e) {
     Logger.log('Post ' + payload.id + ': ' + e + ' (is cloudflared running and WEBHOOK_URL current?)');
     return 'failed';
+  }
+}
+
+function btNoExecutions_(text) {
+  try {
+    var body = JSON.parse(text);
+    return Object.prototype.toString.call(body.executions) === '[object Array]' && body.executions.length === 0;
+  } catch (e) {
+    return false;
   }
 }
 

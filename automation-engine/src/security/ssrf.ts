@@ -109,7 +109,7 @@ export const safeLookup: LookupFunction = (hostname, options, callback) => {
       callback(err, '', 0);
       return;
     }
-    const list = addresses as unknown as LookupAddress[];
+    const list = addresses;
     const unsafe = list.find((a) => isPrivateAddress(a.address));
     if (unsafe || list.length === 0) {
       const blockedErr = Object.assign(new Error(`SSRF protection: ${hostname} resolves to a blocked address`), {

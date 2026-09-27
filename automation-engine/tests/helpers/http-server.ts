@@ -35,7 +35,7 @@ export async function startTestServer(initial: Handler): Promise<TestServer> {
     req.on('data', (c: Buffer) => chunks.push(c));
     req.on('end', () => {
       const body = Buffer.concat(chunks).toString('utf8');
-      let parsed: Record<string, unknown> | null = null;
+      let parsed: Record<string, unknown> | null;
       try {
         parsed = body ? (JSON.parse(body) as Record<string, unknown>) : null;
       } catch {

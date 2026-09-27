@@ -12,6 +12,7 @@ import {
 } from '../../errors.js';
 import { TokenBucketLimiter } from '../../lib/rate-limiter.js';
 import { retryAsync, sleep, type BackoffPolicy } from '../../lib/retry.js';
+import { toHttpUrl } from '../../mapper/template-mapper.js';
 import type { Logger } from '../../observability/logger.js';
 import { defineAction, type ActionContext, type IntegrationDriver } from '../integration-driver.js';
 
@@ -278,7 +279,7 @@ export class TelegramClient {
     if (!global.ok) throw new RateLimitError('Telegram bot-wide rate limit reached (client side)', global.retryAfterMs, { code: 'TELEGRAM_CLIENT_RATE_LIMIT' });
     let wait = global.waitMs;
     if (chatId !== undefined) {
-      const chatKey = `${botKey}:${String(chatId)}`;
+      const chatKey = `${botKey}:${typeof chatId === 'string' || typeof chatId === 'number' ? String(chatId) : JSON.stringify(chatId)}`;
       const chat = this.chatLimiter.reserve(chatKey, maxWait);
       if (!chat.ok) {
         this.globalLimiter.release(botKey);
@@ -306,7 +307,7 @@ export class TelegramClient {
     }
     opts.onResponse?.();
 
-    let envelope: TelegramEnvelope<T> | null = null;
+    let envelope: TelegramEnvelope<T> | null;
     try {
       envelope = (await response.body.json()) as TelegramEnvelope<T>;
     } catch (err) {
@@ -318,7 +319,7 @@ export class TelegramClient {
   }
 
   /** Opens up to `warmupConnections` keep-alive sockets ahead of the first real call. */
-  async warmUp(): Promise<void> {
+  async warmUp(periodic = false): Promise<void> {
     const n = this.options.warmupConnections;
     if (n <= 0) return;
     const started = performance.now();
@@ -331,13 +332,16 @@ export class TelegramClient {
       }),
     );
     const failed = results.filter((r) => r.status === 'rejected').length;
-    this.options.logger.info({ connections: n, failed, ms: Math.round(performance.now() - started) }, 'telegram connection pool warmed');
+    const fields = { connections: n, failed, ms: Math.round(performance.now() - started) };
+    if (failed === n) this.options.logger.warn(fields, 'telegram API unreachable while warming the connection pool; requests will retry');
+    else if (periodic) this.options.logger.debug(fields, 'telegram connection pool kept warm');
+    else this.options.logger.info(fields, 'telegram connection pool warmed');
   }
 
   startKeepWarm(): void {
     if (this.options.keepWarmIntervalMs <= 0 || this.keepWarmTimer) return;
     this.keepWarmTimer = setInterval(() => {
-      this.warmUp().catch(() => undefined);
+      this.warmUp(true).catch(() => undefined);
     }, this.options.keepWarmIntervalMs);
     this.keepWarmTimer.unref();
   }
@@ -386,20 +390,31 @@ export const sendPhotoConfigSchema = z
     hasSpoiler: z.boolean().optional(),
     replyMarkup: replyMarkupSchema.optional(),
     /**
-     * When true, a missing photo or a photo Telegram cannot use (unreachable URL,
-     * not an image, caption too long) is delivered as a text message with the
-     * caption instead of failing the step.
+     * Default true: a missing or invalid photo (not an http(s) URL or file_id), or
+     * one Telegram cannot use (unreachable URL, not an image, caption too long), is
+     * delivered as a text message with the caption instead of failing the step.
+     * Set false to fail the step instead.
      */
     fallbackToMessage: z.boolean().optional(),
   })
   .superRefine((config, ctx) => {
-    if (!config.fallbackToMessage && !config.photo) {
+    if (!config.photo && (config.fallbackToMessage === false || !config.caption?.trim())) {
       ctx.addIssue({ code: 'custom', path: ['photo'], message: 'photo must not be empty' });
     }
-    if (config.fallbackToMessage && !config.caption?.trim()) {
-      ctx.addIssue({ code: 'custom', path: ['caption'], message: 'caption is required when fallbackToMessage is true' });
-    }
   });
+
+/** Telegram file_id: long URL-safe token (never contains "/", "." or spaces). */
+const FILE_ID = /^[A-Za-z0-9_-]{30,255}$/;
+
+/**
+ * Returns what can safely be sent as `photo`: an absolute http(s) URL (normalized;
+ * `//host/...` becomes https) or a Telegram file_id. Empty, relative, malformed and
+ * non-http values return undefined, so sendPhoto is never attempted with them.
+ */
+export function usablePhoto(photo: string | undefined): string | undefined {
+  if (!photo) return undefined;
+  return toHttpUrl(photo) ?? (FILE_ID.test(photo) ? photo : undefined);
+}
 
 // Telegram 400 errors meaning "this photo cannot be used"; everything else (chat
 // not found, bad token, HTML parse errors) must still fail the step.
@@ -441,11 +456,34 @@ export interface TelegramDriverOptions {
   defaultChatId?: string | undefined;
 }
 
+/** How long a photo Telegram rejected as unusable is remembered (per process). */
+const UNUSABLE_PHOTO_TTL_MS = 15 * 60_000;
+const UNUSABLE_PHOTO_MAX = 1_000;
+
 export function createTelegramDriver(client: TelegramClient, options: TelegramDriverOptions = {}): IntegrationDriver {
+  // Photos Telegram could not use. A retry (e.g. after the text fallback was rate
+  // limited) goes straight to sendMessage instead of re-sending a photo that will
+  // fail again and spend the channel's rate-limit budget each time.
+  const unusablePhotos = new Map<string, number>();
+  const rememberUnusable = (photo: string): void => {
+    if (unusablePhotos.size >= UNUSABLE_PHOTO_MAX) {
+      const oldest = unusablePhotos.keys().next();
+      if (!oldest.done) unusablePhotos.delete(oldest.value);
+    }
+    unusablePhotos.set(photo, Date.now() + UNUSABLE_PHOTO_TTL_MS);
+  };
+  const knownUnusable = (photo: string): boolean => {
+    const expiresAt = unusablePhotos.get(photo);
+    if (expiresAt === undefined) return false;
+    if (expiresAt > Date.now()) return true;
+    unusablePhotos.delete(photo);
+    return false;
+  };
+
   const callOptions = (context: ActionContext): TelegramCallOptions => ({
     signal: context.signal,
-    onRequestStart: context.markRequestStart,
-    onResponse: context.markResponse,
+    onRequestStart: () => context.markRequestStart(),
+    onResponse: () => context.markResponse(),
   });
 
   return {
@@ -486,14 +524,23 @@ export function createTelegramDriver(client: TelegramClient, options: TelegramDr
             return { output: { ...messageOutput(message), fallback: 'sendMessage', fallbackReason: reason } };
           };
 
-          // Never call sendPhoto without a photo (schema guarantees fallbackToMessage here).
-          if (!config.photo) return sendAsText('missing_photo');
+          const canFallback = config.fallbackToMessage !== false && Boolean(config.caption?.trim());
+          const photo = usablePhoto(config.photo);
+          // Never call sendPhoto with an empty, relative or malformed photo.
+          if (!photo) {
+            if (canFallback) return sendAsText(config.photo ? 'invalid_photo' : 'missing_photo');
+            throw new ConfigurationError('Invalid configuration for telegram.sendPhoto', {
+              code: 'STEP_CONFIG_INVALID',
+              details: { issues: [{ path: 'photo', message: 'photo must be an absolute http(s) URL or a Telegram file_id' }] },
+            });
+          }
+          if (canFallback && knownUnusable(photo)) return sendAsText('photo_rejected_on_previous_attempt');
           try {
             const message = await client.sendPhoto(
               token,
               {
                 chatId,
-                photo: config.photo,
+                photo,
                 caption: config.caption,
                 parseMode: config.parseMode,
                 disableNotification: config.disableNotification,
@@ -506,8 +553,10 @@ export function createTelegramDriver(client: TelegramClient, options: TelegramDr
             );
             return { output: messageOutput(message) };
           } catch (err) {
-            if (config.fallbackToMessage && isPhotoUnusableError(err)) {
-              return sendAsText(String((err as ExternalApiError).details?.['description'] ?? 'photo rejected'));
+            if (canFallback && isPhotoUnusableError(err)) {
+              rememberUnusable(photo);
+              const description = (err as ExternalApiError).details?.['description'];
+              return sendAsText(typeof description === 'string' ? description : 'photo rejected');
             }
             throw err;
           }

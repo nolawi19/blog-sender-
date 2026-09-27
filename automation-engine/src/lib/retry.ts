@@ -30,16 +30,21 @@ export function retryDelayFor(err: unknown, retryNumber: number, policy: Backoff
   return computeBackoffDelay(retryNumber, policy, random);
 }
 
+function abortReason(signal: AbortSignal): Error {
+  const reason: unknown = signal.reason;
+  return reason instanceof Error ? reason : new Error(typeof reason === 'string' ? `Aborted: ${reason}` : 'Aborted');
+}
+
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (ms <= 0) return Promise.resolve();
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
-      reject(signal.reason ?? new Error('Aborted'));
+      reject(abortReason(signal));
       return;
     }
     const onAbort = (): void => {
       clearTimeout(timer);
-      reject(signal?.reason ?? new Error('Aborted'));
+      if (signal) reject(abortReason(signal));
     };
     const timer = setTimeout(() => {
       signal?.removeEventListener('abort', onAbort);

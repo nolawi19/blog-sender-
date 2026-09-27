@@ -181,6 +181,19 @@ describe('BloggerToTelegram.gs reference script', () => {
     expect(box.call('checkNewPosts()')).toEqual({ sent: 0, duplicate: 0, failed: 0 });
   });
 
+  it('does not mark a post as sent when the engine ran no workflow for it (202 with no executions)', () => {
+    box.call('checkNewPosts()');
+    const a = clone(feed.feed.entry[0]!);
+    (a['id'] as { $t: string }).$t = 'tag:blogger.com,1999:blog-1.post-8000000000000000002';
+    feed.feed.entry.unshift(a);
+    responses.push({ code: 202, body: '{"accepted":true,"duplicate":false,"executions":[]}' });
+    expect(box.call('checkNewPosts()')).toEqual({ sent: 0, duplicate: 0, failed: 1 });
+    expect(box.logs.join('\n')).toContain('no active workflow ran');
+    responses.push({ code: 202, body: '{"accepted":true,"duplicate":false,"executions":[{"executionId":"e","workflowId":"w"}]}' });
+    expect(box.call('checkNewPosts()')).toEqual({ sent: 1, duplicate: 0, failed: 0 });
+    expect(box.call('checkNewPosts()')).toEqual({ sent: 0, duplicate: 0, failed: 0 });
+  });
+
   it('stops on HTTP 401 and never logs the token', () => {
     responses.push({ code: 401, body: '{"error":{"code":"UNAUTHORIZED"}}' });
     expect(box.call('sendExistingPosts()')).toEqual({ sent: 0, duplicate: 0, failed: 1 });

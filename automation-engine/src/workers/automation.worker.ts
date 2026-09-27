@@ -90,7 +90,7 @@ export function createAutomationProcessor(deps: ProcessorDeps): (job: WorkerJob,
         queueName,
         workflowId: null,
         eventId: null,
-        payload: (job.data ?? {}) as Record<string, unknown>,
+        payload: job.data ?? {},
         error: serializeError(error),
         attempts: attempt,
       });

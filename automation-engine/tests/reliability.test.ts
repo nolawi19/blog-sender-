@@ -82,6 +82,32 @@ describe('configuration', () => {
       expect((err as Error).message).not.toContain('987654321');
     }
   });
+
+  it('rejects a missing WEBHOOK_SECRET or the .env.example placeholder with the generate command', () => {
+    expect(() => loadConfig({ ...TEST_ENV, WEBHOOK_SECRET: undefined })).toThrow(/WEBHOOK_SECRET is required \(generate one with: openssl rand -hex 32\)/);
+    expect(() => loadConfig({ ...TEST_ENV, WEBHOOK_SECRET: '' })).toThrow(/WEBHOOK_SECRET must be at least 16 characters/);
+    expect(() => loadConfig({ ...TEST_ENV, WEBHOOK_SECRET: 'change-me-generate-with-openssl-rand-hex-32' })).toThrow(/WEBHOOK_SECRET is still the \.env\.example placeholder/);
+  });
+
+  it('trims TELEGRAM_BOT_TOKEN and rejects a malformed one without echoing it', () => {
+    expect(loadConfig({ ...TEST_ENV, TELEGRAM_BOT_TOKEN: ` ${BOT_TOKEN}\r` }).TELEGRAM_BOT_TOKEN).toBe(BOT_TOKEN);
+    expect(loadConfig({ ...TEST_ENV, TELEGRAM_BOT_TOKEN: '' }).TELEGRAM_BOT_TOKEN).toBeUndefined();
+    const bad = 'not-a-token-but-a-secret-value';
+    let message = '';
+    try {
+      loadConfig({ ...TEST_ENV, TELEGRAM_BOT_TOKEN: bad });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toMatch(/TELEGRAM_BOT_TOKEN: does not look like a bot token/);
+    expect(message).not.toContain(bad);
+  });
+
+  it('accepts an optional PUBLIC_BASE_URL without a trailing slash', () => {
+    expect(loadConfig(TEST_ENV).PUBLIC_BASE_URL).toBeUndefined();
+    expect(loadConfig({ ...TEST_ENV, PUBLIC_BASE_URL: 'http://localhost:3001/' }).PUBLIC_BASE_URL).toBe('http://localhost:3001');
+    expect(() => loadConfig({ ...TEST_ENV, PUBLIC_BASE_URL: 'not a url' })).toThrow(/PUBLIC_BASE_URL/);
+  });
 });
 
 describe('retries with exponential backoff and jitter', () => {

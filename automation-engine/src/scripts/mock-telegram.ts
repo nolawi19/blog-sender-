@@ -16,7 +16,7 @@
  * (hosts under the reserved .invalid TLD: "failed to get HTTP URL content").
  * GET /requests returns the last 50 calls (method, chat_id, photo, text) without tokens.
  */
-import { createServer, type IncomingMessage } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 const port = Number(process.env['MOCK_TELEGRAM_PORT'] ?? 8081);
 const latencyMs = Number(process.env['MOCK_LATENCY_MS'] ?? 0);
@@ -38,7 +38,9 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-const server = createServer(async (req, res) => {
+const asText = (v: unknown): string => (typeof v === 'string' ? v : v === undefined || v === null ? '' : JSON.stringify(v));
+
+async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const send = (status: number, body: unknown): void => {
     const payload = JSON.stringify(body);
     res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) });
@@ -86,13 +88,13 @@ const server = createServer(async (req, res) => {
   } catch {
     return send(400, { ok: false, error_code: 400, description: 'Bad Request: invalid JSON' });
   }
-  const text = String(body['text'] ?? body['caption'] ?? '');
+  const text = asText(body['text'] ?? body['caption']);
   recent.push({ at: new Date().toISOString(), method, chat_id: body['chat_id'], ...(method === 'sendPhoto' ? { photo: body['photo'] } : {}), text: text.slice(0, 200) });
   if (recent.length > 50) recent.shift();
   if (method === 'getMe') return send(200, { ok: true, result: { id: 123456789, is_bot: true, first_name: 'Mock bot', username: 'mock_automation_bot' } });
   if (body['chat_id'] === undefined || body['chat_id'] === '') return send(400, { ok: false, error_code: 400, description: 'Bad Request: chat_id is empty' });
   // Like Telegram: @username and -100... IDs are channels here, positive IDs are personal chats.
-  const chatRef = String(body['chat_id']);
+  const chatRef = asText(body['chat_id']);
   const isChannel = /^@[A-Za-z][A-Za-z0-9_]{4,31}$/.test(chatRef) || /^-100\d+$/.test(chatRef);
   if (method === 'getChat') {
     if (isChannel) return send(200, { ok: true, result: { id: -1001234567890, type: 'channel', title: 'Mock channel', ...(chatRef.startsWith('@') ? { username: chatRef.slice(1) } : {}) } });
@@ -108,9 +110,9 @@ const server = createServer(async (req, res) => {
   }
   if (method === 'sendPhoto' && !body['photo']) return send(400, { ok: false, error_code: 400, description: 'Bad Request: there is no photo in the request' });
   if (method === 'sendPhoto') {
-    let host = '';
+    let host: string;
     try {
-      host = new URL(String(body['photo'])).hostname;
+      host = new URL(asText(body['photo'])).hostname;
     } catch {
       return send(400, { ok: false, error_code: 400, description: 'Bad Request: wrong file identifier/HTTP URL specified' });
     }
@@ -128,6 +130,13 @@ const server = createServer(async (req, res) => {
       chat: { id: Number.isFinite(chatId) ? chatId : 0, type: 'private' },
       ...(method === 'sendPhoto' ? { caption: body['caption'] } : { text: body['text'] }),
     },
+  });
+}
+
+const server = createServer((req, res) => {
+  handle(req, res).catch(() => {
+    if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error_code: 500, description: 'Internal Server Error: mock failure' }));
   });
 });
 

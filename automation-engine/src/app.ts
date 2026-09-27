@@ -48,6 +48,7 @@ export async function buildApp(deps: GatewayDependencies): Promise<FastifyInstan
 
   const app = Fastify({
     // Widen to Fastify's logger interface so the instance keeps the default generic.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- the cast drives generic inference
     loggerInstance: deps.logger as FastifyBaseLogger,
     // Per-request "incoming/completed" lines are replaced by one structured line
     // per accepted webhook, which halves logging work on the hot path.
@@ -96,7 +97,7 @@ export async function buildApp(deps: GatewayDependencies): Promise<FastifyInstan
   app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (request, body, done) => {
     const raw = body as Buffer;
     request.rawBody = raw;
-    jsonParser(request, raw.toString('utf8'), done);
+    void jsonParser(request, raw.toString('utf8'), done);
   });
 
   app.setErrorHandler((error: unknown, request, reply) => {
